@@ -96,7 +96,7 @@ export class HudScene extends Phaser.Scene {
     const cs = getComputedStyle(document.documentElement);
     const k = this.scale.width / Math.max(1, window.innerWidth);
     const px = (v: string) => (parseFloat(cs.getPropertyValue(v)) || 0) * k;
-    return { l: px('--sal') + 20, r: px('--sar') + 20, t: px('--sat') + 16, b: px('--sab') + 16 };
+    return { l: px('--sal') + 20, r: px('--sar') + 20, t: px('--sat') + 16, b: px('--sab') + 16, k, bar: px('--sat') + 72 * k };
   }
 
   private layout() {
@@ -107,15 +107,16 @@ export class HudScene extends Phaser.Scene {
     this.hpText.setPosition(s.l, s.t + 20);
     this.lvText.setPosition(s.l + 244, s.t - 3);
     this.team.setPosition(s.l, s.t + 60);
-    this.money.setPosition(w - s.r - 4, s.t + 60);
-    this.clock.setPosition(w - s.r - 4, s.t + 94);
-    this.zone.setPosition(w - s.r - 4, s.t + 116);
-    this.weapon.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.t + 70 : h - s.b - 78);
-    this.ammo.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.t + 90 : h - s.b - 58);
-    this.items.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.t + 126 : h - s.b - 20);
+    this.money.setPosition(w - s.r - 4, s.bar);
+    this.clock.setPosition(w - s.r - 4, s.bar + 34);
+    this.zone.setPosition(w - s.r - 4, s.bar + 56);
+    this.weapon.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.bar + 4 : h - s.b - 78);
+    this.ammo.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.bar + 24 : h - s.b - 58);
+    this.items.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.bar + 60 : h - s.b - 20);
     this.prompt.setPosition(w / 2, h - s.b - (touch ? 140 : 70));
-    this.banner.setPosition(w / 2, h * 0.26);
-    this.sub.setPosition(w / 2, h * 0.26 + 40);
+    const by = touch ? Math.max(h * 0.3, s.bar + 120) : h * 0.26;
+    this.banner.setPosition(w / 2, by);
+    this.sub.setPosition(w / 2, by + 40);
     this.stats.setPosition(s.l, h - s.b - (touch ? 8 : 100));
     const R = w - s.r;
     const B = h - s.b;

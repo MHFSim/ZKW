@@ -945,7 +945,11 @@ export class World implements CollisionWorld {
       const pad = this.level.helipad;
       const alive = [...this.players.values()].filter((p) => p.alive);
       const onPad = alive.filter((p) => rectContains(pad, p.x, p.y - 10));
-      if ((alive.length && onPad.length === alive.length) || this.radioTimer <= 0) {
+      if (this.radioTimer <= 0 && onPad.length === 0) {
+        this.radioPhase = 3;
+        this.radioTimer = 45;
+        this.events.push({ t: 'notice', text: 'Der Hubschrauber musste abdrehen – er kommt in 45 Sekunden zurück!', tone: 'warn' });
+      } else if ((alive.length && onPad.length === alive.length) || this.radioTimer <= 0) {
         this.radioPhase = 5;
         this.victory = true;
         for (const p of onPad) this.grantXp(p, 3000);

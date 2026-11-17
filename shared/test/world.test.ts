@@ -291,3 +291,34 @@ describe('Protokoll und Speichern', () => {
     expect(sampleDay(12).ambientI).toBeGreaterThan(0.9);
   });
 });
+
+describe('Finale', () => {
+  it('Funkspruch → Verteidigung → Mutant → Landeplatz → Sieg', () => {
+    const w = new World(level, 7);
+    const p = w.addPlayer(0, 'Host');
+    run(w, 30);
+    w.radioParts = 7;
+    const r = level.radio;
+    Object.assign(p, { x: r.x, y: r.y, vx: 0, vy: 0, hp: 100000, maxHp: 100000 });
+    run(w, 2, 0, { moveX: 0, aim: 0, bits: InputBits.Interact });
+    run(w, 2, 0, idle);
+    expect(w.radioPhase).toBe(1);
+    // Verteidigung überstehen (Spieler unverwundbar gemacht)
+    for (let i = 0; i < 125 * 60; i++) {
+      p.hp = p.maxHp;
+      p.downed = false;
+      run(w, 1, 0, idle);
+    }
+    expect(w.radioPhase).toBe(2);
+    const boss = [...w.zombies.values()].find((z) => z.kind === 11);
+    expect(boss).toBeTruthy();
+    w.damageZombie(boss!, 1e6, p, false, 0, boss!.x, boss!.y, false);
+    expect(w.radioPhase).toBe(3);
+    run(w, 31 * 60);
+    expect(w.radioPhase).toBe(4);
+    const pad = level.helipad;
+    Object.assign(p, { alive: true, downed: false, x: pad.x + pad.w / 2, y: pad.y + pad.h - 2, vx: 0, vy: 0 });
+    run(w, 3);
+    expect(w.victory).toBe(true);
+  });
+});

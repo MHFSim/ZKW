@@ -1,6 +1,6 @@
 /** Gemeinsamer Zustand der Steuerung (Touch-HUD schreibt, Spielszene liest). */
 export const controls = {
-  touch: false,
+  touch: typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches,
   moveX: 0,
   up: false,
   down: false,
