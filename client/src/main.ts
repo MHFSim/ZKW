@@ -18,18 +18,30 @@ import { store } from './ui/store';
 
 let session: Session | undefined;
 
+const qs = new URLSearchParams(location.search);
+const benchLights = qs.has('debug') && qs.get('maxlights') ? Number(qs.get('maxlights')) : undefined;
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
   parent: 'game',
   backgroundColor: '#05070f',
   scale: { mode: Phaser.Scale.EXPAND, width: 1280, height: 720, autoCenter: Phaser.Scale.CENTER_BOTH },
-  render: { antialias: true, maxLights: settings.preset === 'ultra' ? 32 : settings.preset === 'niedrig' ? 8 : 16, powerPreference: 'high-performance' },
+  render: { antialias: true, antialiasGL: false, maxLights: benchLights ?? (settings.preset === 'ultra' ? 24 : settings.preset === 'niedrig' ? 8 : 12), powerPreference: 'high-performance' },
   input: { activePointers: 5 },
   scene: [GameScene, HudScene],
 });
 (window as any).__zkw = game;
 Object.defineProperty(window, '__session', { get: () => session });
-if (location.search.includes('debug')) (window as any).__debug = (msg: object) => (session as any)?.debug?.(msg);
+if (qs.has('debug')) {
+  (window as any).__debug = (msg: object) => (session as any)?.debug?.(msg);
+  // Messung: reine JS-Zeit pro Bild (ohne GPU)
+  const perf = ((window as any).__perf = { js: [] as number[] });
+  let t0 = 0;
+  game.events.on('prestep', () => (t0 = performance.now()));
+  game.events.on('postrender', () => {
+    perf.js.push(performance.now() - t0);
+    if (perf.js.length > 600) perf.js.shift();
+  });
+}
 onUiOpenChange((open) => game.registry.set('uiOpen', open || !session));
 
 const gameScene = () => game.scene.getScene('game') as GameScene;
@@ -156,15 +168,23 @@ function showMenuIfEmpty() {
 function showHelp() {
   sheet(
     'Steuerung',
-    `<div class="toggle-row"><span>Laufen</span><span class="hint">A / D · linker Daumen</span></div>
-     <div class="toggle-row"><span>Springen · Leiter hoch</span><span class="hint">Leertaste / W · Knopf SPRUNG, Stick nach oben</span></div>
-     <div class="toggle-row"><span>Leiter runter · durch Stege fallen</span><span class="hint">S · Stick nach unten</span></div>
-     <div class="toggle-row"><span>Zielen und Schießen</span><span class="hint">Maus + Klick · rechter Daumen, weit ziehen = Feuer</span></div>
-     <div class="toggle-row"><span>Aktion (Tür, Kauf, Station, Wiederbeleben)</span><span class="hint">E · Knopf AKTION</span></div>
-     <div class="toggle-row"><span>Nachladen · Waffe wechseln · Heilen</span><span class="hint">R · Q / Mausrad / 1–3 · H</span></div>
-     <div class="toggle-row"><span>Granate · Molotow</span><span class="hint">G · F · Knopf WURF</span></div>
-     <div class="toggle-row"><span>Inventar · Karte</span><span class="hint">I · M · Symbole oben</span></div>
-     <div class="toggle-row"><span>Speichern</span><span class="hint">F5 oder Pause-Menü – jederzeit</span></div>`,
+    `<h3>Handy</h3>
+     <div class="toggle-row"><span>Laufen</span><span class="hint">linker Daumen – der Stick erscheint, wo du tippst</span></div>
+     <div class="toggle-row"><span>Springen · Leiter hoch</span><span class="hint">linken Stick nach oben schnippen oder SPRUNG</span></div>
+     <div class="toggle-row"><span>Leiter runter · durch Stege</span><span class="hint">linken Stick nach unten</span></div>
+     <div class="toggle-row"><span>Zielen und Schießen</span><span class="hint">rechter Daumen: Richtung ziehen – ab einem Drittel wird gefeuert</span></div>
+     <div class="toggle-row"><span>Aktion</span><span class="hint">AKTION leuchtet, wenn etwas geht (Tür, Kauf, Station)</span></div>
+     <div class="toggle-row"><span>Waffe wechseln</span><span class="hint">WAFFE oder auf die Waffenanzeige tippen</span></div>
+     <h3>Tastatur und Maus</h3>
+     <div class="toggle-row"><span>Laufen · Springen · Runter</span><span class="hint">A/D · Leertaste/W · S</span></div>
+     <div class="toggle-row"><span>Zielen · Schießen · Werfen</span><span class="hint">Maus · Linksklick · Rechtsklick (G Granate, F Molotow)</span></div>
+     <div class="toggle-row"><span>Aktion · Laden · Heilen</span><span class="hint">E · R (leer = automatisch) · H</span></div>
+     <div class="toggle-row"><span>Waffe wechseln</span><span class="hint">Q · Mausrad · 1–3</span></div>
+     <div class="toggle-row"><span>Inventar · Karte · Pause · Speichern</span><span class="hint">I · M · Esc · F5</span></div>
+     <h3>Controller</h3>
+     <div class="toggle-row"><span>Laufen · Zielen · Schießen</span><span class="hint">linker Stick · rechter Stick · RT</span></div>
+     <div class="toggle-row"><span>Springen · Aktion · Laden · Waffe</span><span class="hint">A · X · B · Y</span></div>
+     <div class="toggle-row"><span>Heilen · Werfen · Pause</span><span class="hint">LB · RB · Start</span></div>`,
   );
 }
 
@@ -180,8 +200,8 @@ function showInstall() {
 
 const PRESETS: Record<Settings['preset'], Partial<Settings>> = {
   niedrig: { bloom: false, vignette: false, rain: 'mittel' },
-  mittel: { bloom: true, vignette: false, rain: 'mittel' },
-  hoch: { bloom: true, vignette: true, rain: 'hoch' },
+  mittel: { bloom: false, vignette: true, rain: 'mittel' },
+  hoch: { bloom: false, vignette: true, rain: 'hoch' },
   ultra: { bloom: true, vignette: true, rain: 'hoch' },
 };
 
@@ -197,7 +217,7 @@ function showSettings(inGame = false) {
     `<div class="field"><label for="name">Name</label><input id="name" class="input" maxlength="20" value="${esc(playerName())}" /></div>
      <h3>Grafik</h3>
      <div class="toggle-row"><span>Qualität<br><span class="hint">Standard: Hoch. Wird nie automatisch heruntergeregelt.</span></span>${seg('preset', [['niedrig', 'Niedrig'], ['mittel', 'Mittel'], ['hoch', 'Hoch'], ['ultra', 'Ultra']], settings.preset)}</div>
-     ${tog('bloom', 'Leuchteffekt (Bloom)')}
+     ${tog('bloom', 'Kamera-Bloom (aufwendig, Ultra)')}
      ${tog('vignette', 'Vignette')}
      <div class="toggle-row"><span>Regen und Schnee</span>${seg('rain', [['aus', 'Aus'], ['mittel', 'Mittel'], ['hoch', 'Hoch']], settings.rain)}</div>
      ${tog('shake', 'Kamera-Wackeln')}
@@ -261,6 +281,9 @@ function enterGameChrome() {
   bar.querySelector('[data-inv]')!.addEventListener('click', () => openInventory(panelCtx()));
   bar.querySelector('[data-map]')!.addEventListener('click', () => openMap(panelCtx()));
   bar.querySelector('[data-pause]')!.addEventListener('click', showPause);
+  // Fadenkreuz als Hardware-Cursor: folgt der Maus ohne Verzögerung
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><g fill='none' stroke-linecap='round'><circle cx='16' cy='16' r='7' stroke='%23000' stroke-opacity='.55' stroke-width='4'/><circle cx='16' cy='16' r='7' stroke='%23ffb547' stroke-width='2'/><path d='M16 2v6M16 24v6M2 16h6M24 16h6' stroke='%23000' stroke-opacity='.55' stroke-width='4'/><path d='M16 2v6M16 24v6M2 16h6M24 16h6' stroke='%23fff' stroke-width='2'/></g></svg>`;
+  document.getElementById('game')!.style.cursor = `url("data:image/svg+xml,${svg.replace(/#/g, '%23').replace(/"/g, "'")}") 16 16, crosshair`;
   ui().append(bar);
   refreshUiOpen();
   if (matchMedia('(pointer: coarse)').matches) {
@@ -416,6 +439,7 @@ function showPause() {
 }
 
 function leave(message?: string) {
+  document.getElementById('game')!.style.cursor = '';
   const s = session;
   session = undefined;
   s?.close();

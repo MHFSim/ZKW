@@ -1,28 +1,16 @@
-import { InputBits } from '@zkw/shared';
 import Phaser from 'phaser';
 import { ELEMENT_NAMES, type GameEvent } from '@zkw/shared';
 import { sfx } from '../audio';
 import { controls, settings } from '../ui/state';
 import type { HudData } from './GameScene';
+import { TouchControls } from './touch';
 
 const FONT = 'Inter, system-ui, sans-serif';
+const INTERACT_VERB: Record<string, string> = {
+  door: 'ÖFFNEN', wallbuy: 'KAUFEN', ammo: 'MUNITION', truhe: 'TRUHE', station: 'NUTZEN', generator: 'STROM',
+  teleport: 'FAHREN', radio: 'FUNKEN', trade: 'HANDELN', loot: 'NEHMEN', bag: 'NEHMEN', weapon: 'NEHMEN',
+};
 const DISPLAY = '"Chakra Petch", Inter, sans-serif';
-
-interface Stick {
-  pointerId: number;
-  ox: number;
-  oy: number;
-  base: Phaser.GameObjects.Arc;
-  knob: Phaser.GameObjects.Arc;
-}
-
-interface Btn {
-  c: Phaser.GameObjects.Container;
-  r: number;
-  txt: Phaser.GameObjects.Text;
-  key: 'jump' | 'interact' | 'reload' | 'heal' | 'switch' | 'grenade';
-  pointer: number;
-}
 
 /**
  * HUD und Touch-Steuerung – eigene Szene ohne Licht und ohne Kamera-Filter,
@@ -41,14 +29,13 @@ export class HudScene extends Phaser.Scene {
   private prompt!: Phaser.GameObjects.Text;
   private tip!: Phaser.GameObjects.Text;
   private tipUntil = 0;
+  private firstHud = 0;
   private tipsSeen = new Set<string>(JSON.parse(localStorage.getItem('uw-tips') ?? '[]'));
   private banner!: Phaser.GameObjects.Text;
   private sub!: Phaser.GameObjects.Text;
   private stats!: Phaser.GameObjects.Text;
   private team!: Phaser.GameObjects.Text;
-  private left?: Stick;
-  private right?: Stick;
-  private buttons: Btn[] = [];
+  private touch!: TouchControls;
   private bannerUntil = 0;
   private wasSafe = false;
   private data_?: HudData;
@@ -74,13 +61,24 @@ export class HudScene extends Phaser.Scene {
     this.weapon = t(15, '#f2f4f8', FONT, '600');
     this.ammo = t(28, '#f2f4f8', DISPLAY, '700');
     this.items = t(14, '#9aa4b2', FONT, '600');
+    // Auf Touch: Tippen auf die Waffenanzeige wechselt die Waffe
+    for (const o of [this.weapon, this.ammo]) o.setInteractive().on('pointerdown', () => controls.touch && (controls.switchPulse = true));
     this.prompt = t(21, '#ffb547', DISPLAY, '700').setOrigin(0.5);
     this.tip = t(16, '#b9d6ff').setOrigin(0.5).setAlpha(0);
     this.banner = t(30, '#3ddc97', DISPLAY, '700').setOrigin(0.5).setAlpha(0);
     this.sub = t(17, '#f2f4f8', FONT, '600').setOrigin(0.5);
     this.stats = t(12, '#9aa4b2', FONT, '500');
 
-    this.buildTouch();
+    this.touch = new TouchControls(
+      this,
+      () => !!this.game.registry.get('uiOpen'),
+      () => this.game.events.emit('throw', (this.data_?.grenades ?? 0) > 0 ? 'granate' : 'molotow'),
+    );
+    const onRegistry = (_p: unknown, key: string, value: unknown) => {
+      if (key === 'uiOpen' && value) this.touch.releaseAll();
+    };
+    this.game.registry.events.on('changedata', onRegistry);
+    this.events.once('shutdown', () => this.game.registry.events.off('changedata', onRegistry));
     this.layout();
     this.scale.on('resize', () => this.layout());
     const onHud = (d: HudData) => this.apply(d);
@@ -93,8 +91,6 @@ export class HudScene extends Phaser.Scene {
       this.game.events.off('hud', onHud);
       this.game.events.off('toast', onToast);
       this.game.events.off('gameEvent', onEvent);
-      this.buttons = [];
-      this.left = this.right = undefined;
     });
   }
 
@@ -125,126 +121,9 @@ export class HudScene extends Phaser.Scene {
     this.banner.setPosition(w / 2, by);
     this.sub.setPosition(w / 2, by + 40);
     this.stats.setPosition(s.l, h - s.b - (touch ? 8 : 100));
-    const R = w - s.r;
-    const B = h - s.b;
-    const place: Record<Btn['key'], [number, number]> = {
-      jump: [R - 80, B - 80],
-      interact: [R - 210, B - 62],
-      reload: [R - 66, B - 222],
-      switch: [R - 176, B - 186],
-      heal: [s.l + 56, B - 250],
-      grenade: [s.l + 56, B - 350],
-    };
-    for (const b of this.buttons) b.c.setPosition(...place[b.key]);
+    this.touch.setVisible(touch);
+    this.touch.layout(s);
     if (this.data_) this.apply(this.data_);
-  }
-
-  private button(key: Btn['key'], label: string, r: number, color: number) {
-    const c = this.add.container(0, 0);
-    const bg = this.add.circle(0, 0, r, 0x141a24, 0.5).setStrokeStyle(2, color, 0.9);
-    const txt = this.add.text(0, 0, label, { fontFamily: DISPLAY, fontSize: `${Math.max(12, Math.round(r * 0.32))}px`, fontStyle: '700', color: '#f2f4f8', align: 'center' }).setOrigin(0.5);
-    c.add([bg, txt]);
-    const b: Btn = { c, r, txt, key, pointer: -1 };
-    this.buttons.push(b);
-    return b;
-  }
-
-  private buildTouch() {
-    this.buttons = [];
-    this.button('jump', 'SPRUNG', 62, 0xffb547);
-    this.button('interact', 'AKTION', 46, 0x6ec8ff);
-    this.button('reload', 'LADEN', 38, 0xf2f4f8);
-    this.button('switch', 'WAFFE', 38, 0xf2f4f8);
-    this.button('heal', 'HEILEN', 40, 0x3ddc97);
-    this.button('grenade', 'WURF', 40, 0xff8a3d);
-    this.setTouchVisible(controls.touch);
-
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      sfx.unlock();
-      if (p.wasTouch && !controls.touch) {
-        controls.touch = true;
-        this.setTouchVisible(true);
-        this.layout();
-      }
-      if (!controls.touch || this.game.registry.get('uiOpen')) return;
-      for (const b of this.buttons) {
-        if (Math.hypot(p.x - b.c.x, p.y - b.c.y) > b.r + 12) continue;
-        b.pointer = p.id;
-        b.c.setScale(0.92);
-        navigator.vibrate?.(8);
-        if (b.key === 'jump') (controls.jump = true), (controls.pulse |= InputBits.Jump);
-        if (b.key === 'interact') (controls.interact = true), (controls.pulse |= InputBits.Interact);
-        if (b.key === 'reload') (controls.reload = true), (controls.pulse |= InputBits.Reload);
-        if (b.key === 'heal') (controls.heal = true), (controls.pulse |= InputBits.Heal);
-        if (b.key === 'switch') controls.switchPulse = true;
-        if (b.key === 'grenade') this.game.events.emit('throw', (this.data_?.grenades ?? 0) > 0 ? 'granate' : 'molotow');
-        return;
-      }
-      if (p.x < this.scale.width * 0.45 && !this.left) this.left = this.stick(p, 0xffffff);
-      else if (p.x >= this.scale.width * 0.45 && !this.right) this.right = this.stick(p, 0xffb547);
-    });
-
-    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      if (this.left && p.id === this.left.pointerId) {
-        const dx = Phaser.Math.Clamp(p.x - this.left.ox, -70, 70);
-        const dy = Phaser.Math.Clamp(p.y - this.left.oy, -70, 70);
-        this.left.knob.setPosition(this.left.ox + dx, this.left.oy + dy);
-        controls.moveX = Math.abs(dx) < 10 ? 0 : dx / 70;
-        controls.up = dy < -38; // nach oben = klettern/springen
-        controls.down = dy > 38; // nach unten = runterklettern/durchfallen
-      }
-      if (this.right && p.id === this.right.pointerId) {
-        const dx = p.x - this.right.ox;
-        const dy = p.y - this.right.oy;
-        const len = Math.hypot(dx, dy);
-        const cl = Math.min(len, 70);
-        if (len > 6) {
-          controls.aimX = dx / len;
-          controls.aimY = dy / len;
-          controls.aimActive = true;
-        }
-        this.right.knob.setPosition(this.right.ox + (dx / (len || 1)) * cl, this.right.oy + (dy / (len || 1)) * cl);
-        controls.fire = cl / 70 >= 0.8; // ab 80 % Auslenkung automatisch schießen
-      }
-    });
-
-    const release = (p: Phaser.Input.Pointer) => {
-      for (const b of this.buttons) {
-        if (b.pointer !== p.id) continue;
-        b.pointer = -1;
-        b.c.setScale(1);
-        if (b.key === 'jump') controls.jump = false;
-        if (b.key === 'interact') controls.interact = false;
-        if (b.key === 'reload') controls.reload = false;
-        if (b.key === 'heal') controls.heal = false;
-      }
-      if (this.left && p.id === this.left.pointerId) {
-        this.left.base.destroy();
-        this.left.knob.destroy();
-        this.left = undefined;
-        controls.moveX = 0;
-        controls.up = controls.down = false;
-      }
-      if (this.right && p.id === this.right.pointerId) {
-        this.right.base.destroy();
-        this.right.knob.destroy();
-        this.right = undefined;
-        controls.fire = false;
-        controls.aimActive = false;
-      }
-    };
-    this.input.on('pointerup', release);
-    this.input.on('pointerupoutside', release);
-  }
-
-  private stick(p: Phaser.Input.Pointer, color: number): Stick {
-    const base = this.add.circle(p.x, p.y, 76, 0x141a24, 0.35).setStrokeStyle(2, color, 0.45);
-    const knob = this.add.circle(p.x, p.y, 32, color, 0.55);
-    return { pointerId: p.id, ox: p.x, oy: p.y, base, knob };
-  }
-
-  private setTouchVisible(v: boolean) {
-    for (const b of this.buttons) b.c.setVisible(v);
   }
 
   showBanner(msg: string, color = '#3ddc97', sub = '') {
@@ -330,7 +209,7 @@ export class HudScene extends Phaser.Scene {
         prompt = it.label;
         pc = '#9aa4b2';
       } else {
-        prompt = `${it.label}${it.price ? ` · ${it.price.toLocaleString('de-DE')} ¢` : ''}   [${how}]`;
+        prompt = `${it.label}${it.price ? ` · ${it.price.toLocaleString('de-DE')} ¢` : ''}${controls.touch ? '' : `   [${how}]`}`;
         if (!d.canAfford) pc = '#ff4d5e';
       }
     } else if (d.radioPhase === 1) {
@@ -345,7 +224,16 @@ export class HudScene extends Phaser.Scene {
     }
     this.prompt.setText(prompt).setColor(pc);
     this.updateTips(d);
-    for (const b of this.buttons) if (b.key === 'interact') b.c.setAlpha(d.interaction && d.interaction.kind !== 'info' ? 1 : 0.5);
+    const it = d.interaction && d.interaction.kind !== 'info' ? d.interaction : undefined;
+    this.touch.update({
+      canInteract: !!it,
+      interactLabel: it ? INTERACT_VERB[it.kind] ?? 'AKTION' : undefined,
+      heals: d.heals,
+      throwables: d.grenades + d.molotovs,
+      throwLabel: 'WURF',
+      reloading: d.reloading,
+      needReload: !d.melee && d.mag === 0 && d.reserve > 0,
+    });
 
     if (d.inSafe && !this.wasSafe) this.showBanner('Zuflucht – sicher', '#3ddc97', 'Hier greifen dich keine Zombies an · automatisch gespeichert');
     this.wasSafe = d.inSafe;
@@ -373,7 +261,8 @@ export class HudScene extends Phaser.Scene {
   private updateTips(d: HudData) {
     const now = this.time.now;
     this.tip.setAlpha(Phaser.Math.Clamp((this.tipUntil - now) / 400, 0, 1));
-    if (now < this.tipUntil + 1500 || d.grace || !d.alive) return;
+    if (!this.firstHud) this.firstHud = now;
+    if (now < this.tipUntil + 1500 || d.grace || !d.alive || now - this.firstHud < 3000) return;
     const touch = controls.touch;
     const tips: [string, boolean, string][] = [
       ['start', d.inSafe && d.level === 1 && d.kills === 0, touch ? 'Linker Daumen: laufen · Rechter Daumen: zielen, weit ziehen = schießen' : 'A/D laufen · Maus zielen, Klick schießen · E für Türen und Stationen'],

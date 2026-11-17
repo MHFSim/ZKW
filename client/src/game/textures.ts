@@ -627,6 +627,73 @@ function effects(scene: Phaser.Scene) {
   dot(scene, 'snow', '#f4f8ff', 3);
   dot(scene, 'blood', '#9e0d14', 4);
   dot(scene, 'spark', '#ffe2a8', 2);
+
+  // Kugel: weißer, heißer Kern mit weichem Schweif (Farbe kommt per Tint). Spitze rechts.
+  const bl = canvas(96, 12);
+  const bc = ctx2d(bl);
+  const tail = bc.createLinearGradient(0, 0, 96, 0);
+  tail.addColorStop(0, 'rgba(255,255,255,0)');
+  tail.addColorStop(0.75, 'rgba(255,255,255,0.55)');
+  tail.addColorStop(1, 'rgba(255,255,255,0.95)');
+  bc.fillStyle = tail;
+  bc.beginPath();
+  bc.moveTo(0, 6);
+  bc.lineTo(84, 2);
+  bc.quadraticCurveTo(96, 6, 84, 10);
+  bc.closePath();
+  bc.fill();
+  bc.fillStyle = 'rgba(255,255,255,1)';
+  bc.beginPath();
+  bc.ellipse(86, 6, 8, 2.6, 0, 0, Math.PI * 2);
+  bc.fill();
+  addPlain(scene, 'bullet', bl);
+  // Weicher Halo für die Kugel (größer, wird eingefärbt)
+  const bh = canvas(128, 24);
+  const hc = ctx2d(bh);
+  const hg = hc.createRadialGradient(100, 12, 0, 100, 12, 28);
+  hg.addColorStop(0, 'rgba(255,255,255,0.8)');
+  hg.addColorStop(1, 'rgba(255,255,255,0)');
+  hc.fillStyle = hg;
+  hc.fillRect(0, 0, 128, 24);
+  const ht = hc.createLinearGradient(0, 0, 100, 0);
+  ht.addColorStop(0, 'rgba(255,255,255,0)');
+  ht.addColorStop(1, 'rgba(255,255,255,0.35)');
+  hc.fillStyle = ht;
+  hc.fillRect(0, 8, 100, 8);
+  addPlain(scene, 'bullet-halo', bh);
+  // Patronenhülse (Messing) und Einschlag-Staub
+  const cs = canvas(8, 4);
+  const cc = ctx2d(cs);
+  cc.fillStyle = '#c9952e';
+  cc.fillRect(0, 0, 8, 4);
+  cc.fillStyle = '#f2cf6a';
+  cc.fillRect(0, 0, 8, 1.5);
+  cc.fillStyle = '#7a5617';
+  cc.fillRect(6, 0, 2, 4);
+  addPlain(scene, 'casing', cs);
+  radial(scene, 'dust', 32, 'rgba(170,160,145,0.55)', 'rgba(170,160,145,0)');
+  // Mündungsfeuer als Stern (eingefärbt, additiv)
+  const mf = canvas(96, 48);
+  const mc = ctx2d(mf);
+  const core = mc.createRadialGradient(20, 24, 0, 20, 24, 22);
+  core.addColorStop(0, 'rgba(255,255,255,1)');
+  core.addColorStop(1, 'rgba(255,255,255,0)');
+  mc.fillStyle = core;
+  mc.fillRect(0, 0, 96, 48);
+  mc.fillStyle = 'rgba(255,255,255,0.85)';
+  for (const [len, w, ang] of [[92, 7, 0], [46, 5, -0.55], [46, 5, 0.55], [30, 4, -1.2], [30, 4, 1.2]] as const) {
+    mc.save();
+    mc.translate(14, 24);
+    mc.rotate(ang);
+    mc.beginPath();
+    mc.moveTo(0, -w);
+    mc.lineTo(len, 0);
+    mc.lineTo(0, w);
+    mc.closePath();
+    mc.fill();
+    mc.restore();
+  }
+  addPlain(scene, 'muzzle', mf);
   dot(scene, 'acid', '#b8ff3d', 5);
   dot(scene, 'drip', '#8aa0b0', 2);
 
@@ -646,6 +713,27 @@ function effects(scene: Phaser.Scene) {
     }
   }
   addPlain(scene, 'fog', fog);
+
+  // Sternenhimmel (kachelbar) und Vignette als fertige Bilder – kosten beim Zeichnen fast nichts
+  const stars = canvas(1024, 800);
+  const stc = ctx2d(stars);
+  for (let i = 0; i < 160; i++) {
+    const big = hash(i, 77, 1) < 0.1;
+    stc.fillStyle = `rgba(255,255,255,${0.3 + hash(i, 77, 2) * 0.7})`;
+    stc.beginPath();
+    stc.arc(hash(i, 77, 3) * 1024, hash(i, 77, 4) * 800, big ? 1.6 : 0.9, 0, Math.PI * 2);
+    stc.fill();
+  }
+  addPlain(scene, 'stars', stars);
+  const vig = canvas(512, 288);
+  const vc = ctx2d(vig);
+  const vg = vc.createRadialGradient(256, 144, 90, 256, 144, 300);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(0.55, 'rgba(0,0,0,0.12)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.62)');
+  vc.fillStyle = vg;
+  vc.fillRect(0, 0, 512, 288);
+  addPlain(scene, 'vignette', vig);
 
   // Berge (Silhouetten mit Schnee) und Stadt-Skyline mit Fensterlicht
   // Kachelbare Bergkette: Summe ganzzahliger Sinus-Frequenzen über 1024 px → nahtlos wiederholbar

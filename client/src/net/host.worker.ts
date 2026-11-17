@@ -1,3 +1,4 @@
+import { weaponByKey } from '@zkw/shared';
 /// <reference lib="webworker" />
 /**
  * Host-Simulation im Web Worker: fester 60-Hz-Takt, unabhängig vom Bildaufbau
@@ -13,7 +14,7 @@ type InMsg =
   | { type: 'cancelJoin'; key: string }
   | { type: 'leave'; id: number }
   | { type: 'save'; auto?: boolean }
-  | { type: 'debug'; x?: number; y?: number; money?: number; hour?: number; rain?: number; doors?: boolean };
+  | { type: 'debug'; x?: number; y?: number; money?: number; hour?: number; rain?: number; doors?: boolean; weapon?: string };
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 let world: World | undefined;
@@ -116,6 +117,10 @@ ctx.onmessage = (e: MessageEvent<InMsg>) => {
       if (p && m.money !== undefined) p.money = m.money;
       if (m.hour !== undefined) world.hour = m.hour;
       if (m.rain !== undefined) world.rain = world.rainTarget = m.rain;
+      if (p && m.weapon) {
+        const def = weaponByKey(m.weapon);
+        if (def) world.giveWeapon(p, def);
+      }
       if (m.doors) {
         world.doorsOpen = (1 << world.level.doors.length) - 1;
         world.power = true;

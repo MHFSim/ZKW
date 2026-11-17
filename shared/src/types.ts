@@ -55,6 +55,10 @@ export interface PlayerState extends Body {
   lastSafe: number;
   kills: number;
   climbing: boolean;
+  /** Bewegungsgefühl: Zeit seit Bodenkontakt (Coyote-Time), gepufferter Sprung, Sprungtaste gehalten */
+  coyote?: number;
+  jumpBuf?: number;
+  jumpHeld?: boolean;
   // Fortschritt
   level: number;
   xp: number;
@@ -128,7 +132,8 @@ export type GameEvent =
   | { t: 'revived'; id: number; by: number }
   | { t: 'enterSafe'; id: number; safe: number }
   | { t: 'explosion'; x: number; y: number; r: number }
-  | { t: 'shot'; id: number; weapon: number }
+  /** Schuss: Mündung (x, y) und je Projektil Winkel a[i] (rad·1000) und Flugweite d[i] in px (negativ = endet in der Luft, kein Einschlag) */
+  | { t: 'shot'; id: number; weapon: number; x: number; y: number; a: number[]; d: number[] }
   | { t: 'melee'; id: number }
   | { t: 'truhe'; id: number; weapon: number; spot: number }
   | { t: 'pickup'; id: number; kind: string; text: string }

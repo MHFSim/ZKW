@@ -27,17 +27,19 @@ Inspiriert von *Zombie Kill of the Week – Reborn*, aber eine eigene Welt mit e
 
 ### Steuerung
 
-| Aktion | Tastatur/Maus | Touch |
+**Handy:** Linker Daumen läuft (der Stick erscheint dort, wo du tippst; nach oben schnippen = springen/klettern, nach unten = runter). Rechter Daumen zielt – ab einem Drittel Auslenkung wird geschossen. AKTION leuchtet und zeigt, was geht (ÖFFNEN, KAUFEN, NUTZEN …). Leere Magazine laden automatisch nach.
+
+| Aktion | Tastatur/Maus | Controller |
 |---|---|---|
-| Laufen | A / D | linker Daumen |
-| Springen · Leiter hoch | Leertaste / W | SPRUNG · Stick nach oben |
-| Leiter runter · durch Stege | S | Stick nach unten |
-| Zielen, schießen | Maus, Linksklick | rechter Daumen, weit ziehen = Feuer |
-| Aktion (Tür, Kauf, Station, Wiederbeleben) | E | AKTION |
-| Nachladen · Wechseln · Heilen | R · Q/Mausrad/1–3 · H | LADEN · WAFFE · HEILEN |
-| Granate · Molotow | G · F | WURF |
-| Inventar · Karte · Pause | I · M · Esc | Symbole oben rechts |
+| Laufen · Springen · Runter | A/D · Leertaste/W · S | linker Stick · A |
+| Zielen · Schießen | Maus · Linksklick | rechter Stick · RT |
+| Werfen | Rechtsklick (G Granate, F Molotow) | RB |
+| Aktion · Laden · Heilen | E · R · H | X · B · LB |
+| Waffe wechseln | Q · Mausrad · 1–3 | Y |
+| Inventar · Karte · Pause | I · M · Esc | – · – · Start |
 | Speichern | F5 | Pause-Menü |
+
+Sprünge verzeihen kleine Ungenauigkeiten: kurz nach der Kante oder kurz vor der Landung gedrückt zählt noch, kurz antippen ergibt einen kleinen Hüpfer.
 
 ### Mehrspieler
 
@@ -52,7 +54,7 @@ Jederzeit speicherbar (Pause → Speichern oder F5). Automatisch gespeichert wir
 
 ### Grafik
 
-Alles wird per Code erzeugt: Texturen mit Normal-Maps für dynamisches Licht, Taschenlampen-Kegel, Mündungsfeuer, Laternen, Bloom, Vignette, Partikel für Regen, Schnee, Blut, Funken und Feuer. Die Qualität wird **nie automatisch** gesenkt; unter *Einstellungen* gibt es die Stufen Niedrig, Mittel, Hoch (Standard) und Ultra sowie einzelne Schalter.
+Alles wird per Code erzeugt: Texturen mit Normal-Maps für dynamisches Licht, Taschenlampen-Kegel, sichtbare Kugeln mit Leuchtschweif, Mündungsfeuer, Patronenhülsen, Einschläge, Laternen, Vignette, Partikel für Regen, Schnee, Blut, Funken und Feuer. Die Qualität wird **nie automatisch** gesenkt; unter *Einstellungen* gibt es die Stufen Niedrig, Mittel, Hoch (Standard) und Ultra (zusätzlich Kamera-Bloom) sowie einzelne Schalter. Ausgeschaltete Lichter und verdeckter Himmel werden gar nicht erst berechnet, damit das Spiel auch auf Handys mit 60 Bildern pro Sekunde läuft.
 
 ## Entwicklung
 

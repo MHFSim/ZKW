@@ -97,13 +97,27 @@ export function applyMovement(cw: CollisionWorld, p: PlayerState, input: Input, 
     }
   }
 
-  p.vx = approach(p.vx, move * speed, PLAYER_ACCEL * dt);
-  if (jump && p.onGround) {
+  // In der Luft etwas weniger Kontrolle als am Boden – fühlt sich gewichtiger an
+  p.vx = approach(p.vx, move * speed, PLAYER_ACCEL * dt * (p.onGround ? 1 : 0.75));
+  // Sprung mit Puffer (kurz vor der Landung gedrückt zählt) und Coyote-Time (kurz nach der Kante geht noch)
+  const pressedJump = jump && !p.jumpHeld;
+  p.jumpHeld = jump;
+  p.coyote = p.onGround ? 0 : (p.coyote ?? 0) + dt;
+  p.jumpBuf = pressedJump ? JUMP_BUFFER : Math.max(0, (p.jumpBuf ?? 0) - dt);
+  if (p.jumpBuf > 0 && p.coyote < COYOTE_TIME) {
     p.vy = JUMP_VELOCITY;
     p.onGround = false;
+    p.coyote = COYOTE_TIME;
+    p.jumpBuf = 0;
   }
+  // Variable Sprunghöhe: Taste früh loslassen = kleiner Hüpfer
+  if (!jump && p.vy < JUMP_CUT_VELOCITY) p.vy = JUMP_CUT_VELOCITY;
   stepBody(cw, p, dt, { dropThrough: down && !jump });
 }
+
+const COYOTE_TIME = 0.1;
+const JUMP_BUFFER = 0.12;
+const JUMP_CUT_VELOCITY = -300;
 
 /** Schulterhöhe – von hier gehen Schüsse und die Taschenlampe aus. */
 export function muzzleOrigin(p: { x: number; y: number; aim: number }) {

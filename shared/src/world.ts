@@ -550,7 +550,7 @@ export class World implements CollisionWorld {
     this.dirtyPlayers.add(p.id);
   }
 
-  private giveWeapon(p: PlayerState, def: WeaponDef) {
+  giveWeapon(p: PlayerState, def: WeaponDef) {
     const inst: WeaponInst = { uid: p.nextUid++, def: def.id, tier: 1, element: 0, mag: def.mag, reserve: def.kind === 'melee' ? 0 : Math.round(def.reserveMax / 2) };
     if (p.weapons.length >= 3) {
       // volle Hände: aktive Waffe wandert ins Schließfach
@@ -574,7 +574,8 @@ export class World implements CollisionWorld {
 
   private fireWeapon(p: PlayerState, w: WeaponInst, def: WeaponDef) {
     const o = muzzleOrigin(p);
-    this.events.push({ t: 'shot', id: p.id, weapon: def.id });
+    const shot = { t: 'shot' as const, id: p.id, weapon: def.id, x: Math.round(o.x), y: Math.round(o.y), a: [] as number[], d: [] as number[] };
+    this.events.push(shot);
     if (def.kind === 'rocket') {
       this.spawnProjectile(2, o.x, o.y, Math.cos(p.aim) * 900, Math.sin(p.aim) * 900, p.id, def.damage * this.damageMul(p, w), 3);
       return;
@@ -582,11 +583,14 @@ export class World implements CollisionWorld {
     const mul = this.damageMul(p, w);
     for (let i = 0; i < def.pellets; i++) {
       const ang = p.aim + (this.random() - 0.5) * 2 * def.spread;
-      this.hitscan(p, o.x, o.y, ang, def, w, def.damage * mul);
+      const dist = this.hitscan(p, o.x, o.y, ang, def, w, def.damage * mul);
+      shot.a.push(Math.round(ang * 1000));
+      shot.d.push(Math.round(dist));
     }
   }
 
-  private hitscan(p: PlayerState, ox: number, oy: number, ang: number, def: WeaponDef, w: WeaponInst, damage: number) {
+  /** Liefert die Flugweite des Projektils (negativ, wenn es ohne Einschlag in der Luft endet). */
+  private hitscan(p: PlayerState, ox: number, oy: number, ang: number, def: WeaponDef, w: WeaponInst, damage: number): number {
     const dx = Math.cos(ang);
     const dy = Math.sin(ang);
     const wall = raycastTiles(this, ox, oy, dx, dy, def.range);
@@ -607,6 +611,8 @@ export class World implements CollisionWorld {
     for (const h of hits.slice(0, pierce)) {
       this.damageZombie(h.z, damage, p, h.head, w.element, ox + dx * h.t, oy + dy * h.t, def.kind === 'flamer');
     }
+    if (hits.length >= pierce) return hits[pierce - 1].t;
+    return wall < def.range ? wall : -def.range;
   }
 
   private melee(p: PlayerState, w: WeaponInst, def: WeaponDef) {

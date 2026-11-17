@@ -16,7 +16,6 @@ import {
   lerpColor,
   quantizeAngle,
   quantizeMove,
-  raycastTiles,
   rectContains,
   sampleDay,
   scaleColor,
@@ -38,6 +37,8 @@ import { controls, settings } from '../ui/state';
 import { store } from '../ui/store';
 import { PLAYER_COLORS, createTextures } from './textures';
 import { buildTileLayers } from './tiles';
+import { BulletFx, type BulletRef } from './bullets';
+import { pollPad } from './gamepad';
 
 const INTERP_DELAY_MS = 70;
 
@@ -50,6 +51,8 @@ interface PlayerView {
   muzzle: Phaser.GameObjects.Light;
   flash: Phaser.GameObjects.Image;
   lastFire: number;
+  /** Rückstoß 0…1, klingt schnell ab */
+  recoil: number;
   swing: number;
 }
 
@@ -68,6 +71,13 @@ interface LampView {
   kind: string;
   seed: number;
   under: boolean;
+}
+
+/** Licht setzen – ausgeschaltete Lichter unsichtbar machen, damit der Shader sie gar nicht erst durchrechnet. */
+function lit(l: Phaser.GameObjects.Light, intensity: number) {
+  l.setIntensity(intensity);
+  l.setVisible(intensity > 0.02);
+  return l;
 }
 
 const EDGE_BITS = [InputBits.Jump, InputBits.Interact, InputBits.Reload, InputBits.Heal, InputBits.Switch];
@@ -142,10 +152,14 @@ export class GameScene extends Phaser.Scene {
   private truhe!: Phaser.GameObjects.Image;
   private truheLight!: Phaser.GameObjects.Light;
   private hold = new Map<number, number>();
+  private padAt = -1e9;
+  private padAim = 0;
   private selfLight!: Phaser.GameObjects.Light;
   private heli!: Phaser.GameObjects.Image;
   private sky!: Phaser.GameObjects.Graphics;
-  private stars!: Phaser.GameObjects.Graphics;
+  private stars!: Phaser.GameObjects.TileSprite;
+  private vignette?: Phaser.GameObjects.Image;
+  private skyGroup: Phaser.GameObjects.GameObject[] = [];
   private moon!: Phaser.GameObjects.Image;
   private farMtn!: Phaser.GameObjects.TileSprite;
   private farSnow!: Phaser.GameObjects.TileSprite;
@@ -160,13 +174,15 @@ export class GameScene extends Phaser.Scene {
   private fireFx!: Phaser.GameObjects.Particles.ParticleEmitter;
   private smokeFx!: Phaser.GameObjects.Particles.ParticleEmitter;
   private tracers!: Phaser.GameObjects.Graphics;
+  private bullets!: BulletFx;
+  private recentShots: { ref: BulletRef; at: number }[] = [];
+  private beams: { x1: number; y1: number; x2: number; y2: number; until: number; color: number }[] = [];
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private attractHour = 21;
   private attractRain = 0.8;
   private hudTimer = 0;
   private lightning = 0;
   private unsub?: () => void;
-  private lastTracer = new Map<number, number>();
 
   constructor() {
     super('game');
@@ -189,7 +205,6 @@ export class GameScene extends Phaser.Scene {
     this.loreViews.clear();
     this.partViews.clear();
     this.projViews = [];
-    this.lastTracer.clear();
     if (this.session) {
       this.session.cb.onSnapshot = (buf) => this.inbox.push(buf);
       this.session.cb.onEvents = (list) => this.eventInbox.push(...list);
@@ -214,8 +229,11 @@ export class GameScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     cam.setBounds(0, 0, worldW, worldH);
-    if (settings.bloom) Phaser.Actions.AddEffectBloom(cam, { threshold: 0.62, blurRadius: 2, blurSteps: 4, blendAmount: 0.55 });
-    if (settings.vignette) cam.filters.external.addVignette(0.5, 0.5, 0.75, 0.55);
+    // Kamera-Filter erzwingen ein Offscreen-Rendern mit vielen Vollbild-Durchgängen – auf Handys teuer.
+    // Bloom deshalb nur auf „Ultra“ (Lampen, Mündungsfeuer und Kugeln leuchten ohnehin über Glow-Sprites),
+    // die Vignette ist ein einfaches Overlay-Bild.
+    if (settings.bloom) Phaser.Actions.AddEffectBloom(cam, { threshold: 0.66, blurRadius: 3, blurSteps: 2, blendAmount: 0.5 });
+    if (settings.vignette) this.vignette = this.add.image(0, 0, 'vignette').setOrigin(0, 0).setScrollFactor(0).setDepth(95);
 
     if (this.session) {
       this.setupKeyboard();
@@ -233,11 +251,8 @@ export class GameScene extends Phaser.Scene {
 
   private buildBackground() {
     this.sky = this.add.graphics().setScrollFactor(0).setDepth(-100);
-    this.stars = this.add.graphics().setScrollFactor(0).setDepth(-99);
-    for (let i = 0; i < 260; i++) {
-      this.stars.fillStyle(0xffffff, 0.3 + Math.random() * 0.7);
-      this.stars.fillCircle(Math.random() * 2600, Math.random() * 800, Math.random() < 0.1 ? 1.6 : 0.9);
-    }
+    // Sterne einmal in eine Textur zeichnen (statt jedes Bild neu zu tessellieren)
+    this.stars = this.add.tileSprite(0, 0, 10, 800, 'stars').setOrigin(0, 0).setScrollFactor(0).setDepth(-99);
     this.moon = this.add.image(0, 0, 'glow').setScrollFactor(0).setDepth(-98).setBlendMode(Phaser.BlendModes.ADD);
     const ts = (key: string, depth: number, blend = false) => {
       const t = this.add.tileSprite(0, 0, 10, 512, key).setOrigin(0, 1).setScrollFactor(0).setDepth(depth);
@@ -254,7 +269,9 @@ export class GameScene extends Phaser.Scene {
 
   private layoutBackground() {
     const w = this.scale.width;
-    for (const t of [this.farMtn, this.farSnow, this.nearMtn, this.city, this.cityWin, this.fog]) t.setSize(w, t.height);
+    for (const t of [this.farMtn, this.farSnow, this.nearMtn, this.city, this.cityWin, this.fog, this.stars]) t.setSize(w, t.height);
+    this.vignette?.setDisplaySize(w, this.scale.height);
+    this.skyGroup = [this.sky, this.stars, this.moon, this.farMtn, this.farSnow, this.nearMtn, this.city, this.cityWin];
   }
 
   private buildTiles() {
@@ -386,6 +403,9 @@ export class GameScene extends Phaser.Scene {
 
   private buildEffects() {
     this.tracers = this.add.graphics().setDepth(40).setBlendMode(Phaser.BlendModes.ADD);
+    this.bullets = new BulletFx(this);
+    this.recentShots = [];
+    this.beams = [];
     this.bloodFx = this.add.particles(0, 0, 'blood', {
       speed: { min: 80, max: 380 }, angle: { min: 200, max: 340 }, gravityY: 1300, lifespan: { min: 500, max: 1100 },
       scale: { start: 1.1, end: 0.4 }, alpha: { start: 1, end: 0.6 }, emitting: false,
@@ -422,6 +442,10 @@ export class GameScene extends Phaser.Scene {
     kb.addCapture('F5,SPACE,UP,DOWN,LEFT,RIGHT');
     this.keys.F5.on('down', () => this.session?.requestSave());
     this.keys.G.on('down', () => this.throwItem('granate'));
+    // Rechte Maustaste: Granate (oder Molotow, wenn keine Granate da ist)
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (!controls.touch && p.rightButtonDown() && !this.game.registry.get('uiOpen')) this.throwItem((store.me?.items.granate ?? 0) > 0 ? 'granate' : 'molotow');
+    });
     this.keys.F.on('down', () => this.throwItem('molotow'));
     this.keys.ONE.on('down', () => this.session?.sendAction({ a: 'select', slot: 0 }));
     this.keys.TWO.on('down', () => this.session?.sendAction({ a: 'select', slot: 1 }));
@@ -453,7 +477,8 @@ export class GameScene extends Phaser.Scene {
     }
     this.renderEnvironment(time, dt);
     this.tracers.clear();
-    this.renderTracers(time);
+    this.bullets.update(this.game.loop.delta);
+    this.renderBeams(time);
     this.hudTimer -= dt;
     if (this.session && this.hudTimer <= 0) {
       this.hudTimer = 0.1;
@@ -501,6 +526,7 @@ export class GameScene extends Phaser.Scene {
   aimAngle(): number {
     if (!this.me) return 0;
     const o = { x: this.me.x, y: this.me.y - 38 };
+    if (performance.now() - this.padAt < 3000) return settings.aimAssist ? this.assist(o.x, o.y, this.padAim) : this.padAim;
     if (controls.touch) {
       let a = Math.atan2(controls.aimY, controls.aimX);
       if (settings.aimAssist && controls.aimActive) a = this.assist(o.x, o.y, a);
@@ -535,8 +561,19 @@ export class GameScene extends Phaser.Scene {
     const uiOpen = !!this.game.registry.get('uiOpen');
     let moveX = 0;
     let bits = 0;
+    const pad = pollPad();
+    if (pad) {
+      this.padAt = performance.now();
+      if (pad.pressed.has(9)) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      if (!uiOpen) {
+        moveX = pad.moveX;
+        bits |= pad.bits;
+        if (pad.aim !== undefined) this.padAim = pad.aim;
+        if (pad.pressed.has(5)) this.throwItem((store.me?.items.granate ?? 0) > 0 ? 'granate' : 'molotow');
+      }
+    }
     if (!uiOpen) {
-      if (controls.touch) {
+      if (controls.touch && !pad) {
         moveX = controls.moveX;
         if (controls.up) bits |= InputBits.Up | InputBits.Jump;
         if (controls.down) bits |= InputBits.Down;
@@ -546,8 +583,8 @@ export class GameScene extends Phaser.Scene {
         if (controls.reload) bits |= InputBits.Reload;
         if (controls.heal) bits |= InputBits.Heal;
       } else {
-        if (k.A.isDown || k.LEFT.isDown) moveX -= 1;
-        if (k.D.isDown || k.RIGHT.isDown) moveX += 1;
+        if (k.A.isDown || k.LEFT.isDown) moveX = -1;
+        if (k.D.isDown || k.RIGHT.isDown) moveX = moveX < 0 ? 0 : 1;
         if (k.W.isDown || k.UP.isDown) bits |= InputBits.Up | InputBits.Jump;
         if (k.S.isDown || k.DOWN.isDown) bits |= InputBits.Down;
         if (k.SPACE.isDown) bits |= InputBits.Jump;
@@ -610,7 +647,7 @@ export class GameScene extends Phaser.Scene {
     const flashlight = this.lights.addConeLight(0, 0, 760, 0xfff1d6, 0, 0, 0.42, 0.8, 70);
     const muzzle = this.lights.addLight(0, 0, 300, 0xffc46b, 0, 60);
     const flash = this.add.image(0, 0, 'flash').setBlendMode(Phaser.BlendModes.ADD).setDepth(12).setVisible(false);
-    v = { body, gun, gunKey: 'gun', name, flashlight, muzzle, flash, lastFire: 0, swing: 0 };
+    v = { body, gun, gunKey: 'gun', name, flashlight, muzzle, flash, lastFire: 0, swing: 0, recoil: 0 };
     this.players.set(id, v);
     return v;
   }
@@ -717,21 +754,20 @@ export class GameScene extends Phaser.Scene {
       v.name.setPosition(p.x, p.y - 72).setText(id === localId ? '' : `${this.session?.roster.get(id) ?? ''}${p.downed ? ' – am Boden!' : ''}`);
       const lampOn = Phaser.Math.Clamp((this.nightFor(p.y) - 0.2) / 0.5, 0, 1);
       v.flashlight.setPosition(sx + Math.cos(p.aim) * 14, sy + Math.sin(p.aim) * 14);
-      v.flashlight.setConeRotation(p.aim).setIntensity(!down ? 2.6 * lampOn : 0);
+      lit(v.flashlight.setConeRotation(p.aim), !down ? 2.6 * lampOn : 0);
       const def = WEAPONS[p.weapon];
       const ranged = !!def && def.kind !== 'melee';
       const firingNow = p.firing && !down && !p.inSafe && ranged;
-      if (firingNow && t - v.lastFire > 1000 / Math.min(def.fireRate, 15)) {
-        v.lastFire = t;
-        if (id === localId && settings.shake) this.cameras.main.shake(40, def.kind === 'rocket' || def.kind === 'sniper' ? 0.006 : 0.0018);
-      }
-      const flashOn = firingNow && t - v.lastFire < 45 && def.kind !== 'flamer';
+      // Mündungsfeuer und Licht kommen vom echten Schuss-Ereignis (siehe onShot)
+      const flashOn = t - v.lastFire < 55 && def?.kind !== 'flamer';
       const tip = { x: sx + Math.cos(p.aim) * 44, y: sy + Math.sin(p.aim) * 44 };
-      v.muzzle.setPosition(tip.x, tip.y).setIntensity(flashOn ? 2.6 : firingNow && def.kind === 'flamer' ? 2 : 0);
+      lit(v.muzzle.setPosition(tip.x, tip.y), flashOn ? 2.4 * (1 - (t - v.lastFire) / 55) : firingNow && def.kind === 'flamer' ? 2 : 0);
       v.muzzle.setColor(def?.kind === 'laser' ? 0x6ec8ff : 0xffc46b);
-      v.flash.setPosition(tip.x, tip.y).setVisible(flashOn).setRotation(p.aim).setScale(0.6 + Math.random() * 0.4);
+      v.flash.setVisible(false);
       if (firingNow && def.kind === 'flamer') this.fireFx.emitParticleAt(tip.x + Math.cos(p.aim) * 30, tip.y + Math.sin(p.aim) * 30, 2);
-      if (flashOn) this.lastTracer.set(id, t);
+      // Rückstoß: Waffe ruckt kurz nach hinten
+      v.recoil = Math.max(0, v.recoil - (this.game.loop.delta / 1000) * 9);
+      if (v.recoil > 0) v.gun.setPosition(sx - Math.cos(p.aim) * v.recoil * 9, sy - Math.sin(p.aim) * v.recoil * 9).setRotation(gunRot - (left ? -1 : 1) * v.recoil * 0.18);
     }
     for (const [id, v] of this.players)
       if (!players.has(id)) {
@@ -819,44 +855,93 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private renderTracers(time: number) {
-    for (const [id, v] of this.players) {
-      const last = this.lastTracer.get(id) ?? 0;
-      if (time - last > 60 || !v.gun.visible) continue;
-      const net = this.latest?.players.find((p) => p.id === id);
-      const def = net ? WEAPONS[net.weapon] : undefined;
-      if (!def || def.kind === 'melee' || def.kind === 'flamer') continue;
-      const a = v.gun.rotation;
-      const ox = v.gun.x + Math.cos(a) * 44;
-      const oy = v.gun.y + Math.sin(a) * 44;
-      const d = raycastTiles(this.cw, ox, oy, Math.cos(a), Math.sin(a), def.range);
-      if (def.kind === 'laser') {
-        this.tracers.lineStyle(5, 0x6ec8ff, 0.8 * (1 - (time - last) / 60));
-        this.tracers.lineBetween(ox, oy, ox + Math.cos(a) * d, oy + Math.sin(a) * d);
-        continue;
-      }
-      const len = Math.min(d, 260 + ((time * 7 + id * 97) % 400));
-      this.tracers.lineStyle(def.kind === 'sniper' ? 3 : 2, def.tracer, 0.55);
-      this.tracers.lineBetween(ox, oy, ox + Math.cos(a) * len, oy + Math.sin(a) * len);
+  /** Laserstrahlen (Lichtbogen) – kurz aufleuchtend vom Schuss-Ereignis. */
+  private renderBeams(time: number) {
+    this.beams = this.beams.filter((b) => b.until > time);
+    for (const b of this.beams) {
+      const a = (b.until - time) / 110;
+      this.tracers.lineStyle(9, b.color, 0.35 * a).lineBetween(b.x1, b.y1, b.x2, b.y2);
+      this.tracers.lineStyle(3, 0xffffff, 0.9 * a).lineBetween(b.x1, b.y1, b.x2, b.y2);
     }
+  }
+
+  /** Ein echter Schuss vom Host: Kugeln mit der tatsächlichen Flugbahn, Mündungsfeuer, Hülsen, Rückstoß. */
+  private onShot(e: Extract<GameEvent, { t: 'shot' }>) {
+    const def = WEAPONS[e.weapon];
+    if (!def) return;
+    const now = this.time.now;
+    const v = this.players.get(e.id);
+    const local = e.id === this.session?.localId;
+    // Für den eigenen Spieler die vorhergesagte Position nehmen – sonst hinkt das Mündungsfeuer hinterher
+    let ox = e.x;
+    let oy = e.y;
+    if (v && v.gun.visible) {
+      const a0 = e.a.length ? e.a[0] / 1000 : v.gun.rotation;
+      ox = v.gun.x + Math.cos(a0) * 44;
+      oy = v.gun.y + Math.sin(a0) * 44;
+    }
+    if (v) {
+      v.lastFire = now;
+      v.recoil = def.kind === 'sniper' || def.kind === 'shotgun' || def.kind === 'rocket' ? 1 : def.kind === 'smg' || def.kind === 'lmg' ? 0.45 : 0.7;
+    }
+    const ang0 = e.a.length ? e.a[0] / 1000 : (v?.gun.rotation ?? 0);
+    if (def.kind !== 'flamer') this.bullets.muzzle(ox, oy, ang0, def.kind, def.kind === 'laser' ? 0x6ec8ff : 0xffc46b);
+    if (def.kind === 'laser') {
+      for (let i = 0; i < e.a.length; i++) {
+        const a = e.a[i] / 1000;
+        const d = Math.abs(e.d[i]);
+        this.beams.push({ x1: ox, y1: oy, x2: ox + Math.cos(a) * d, y2: oy + Math.sin(a) * d, until: now + 110, color: def.tracer });
+      }
+    } else if (def.kind !== 'flamer') {
+      for (let i = 0; i < e.a.length; i++) {
+        const ref = this.bullets.spawn(def.kind, ox, oy, e.a[i] / 1000, e.d[i], def.tracer);
+        if (ref) this.recentShots.push({ ref, at: now });
+      }
+      if (def.kind !== 'rocket' && v) this.bullets.casing(v.gun.x, v.gun.y - 4, Math.cos(ang0) < 0);
+      if (def.kind === 'shotgun' || def.kind === 'sniper') this.smokeFx.emitParticleAt(ox, oy, 2);
+    }
+    if (local && settings.shake) this.cameras.main.shake(def.kind === 'sniper' || def.kind === 'rocket' ? 90 : 45, def.kind === 'rocket' || def.kind === 'sniper' || def.kind === 'shotgun' ? 0.005 : 0.0016);
+    sfx.shot(e.weapon, local);
+  }
+
+  /** Treffer-Effekte erst zeigen, wenn die sichtbare Kugel ankommt. */
+  private whenBulletArrives(x: number, y: number, fx: () => void) {
+    const now = this.time.now;
+    this.recentShots = this.recentShots.filter((r) => now - r.at < 600);
+    let best: { ref: BulletRef; ms: number } | undefined;
+    for (const r of this.recentShots) {
+      const ms = r.ref.arrival(x, y);
+      if (ms !== undefined && (!best || ms < best.ms)) best = { ref: r.ref, ms };
+    }
+    if (!best || best.ms <= 8) {
+      best?.ref.markHit();
+      fx();
+      return;
+    }
+    best.ref.markHit();
+    this.time.delayedCall(best.ms, fx);
   }
 
   private onEvent(e: GameEvent) {
     const local = this.session?.localId;
     switch (e.t) {
       case 'hit':
-        this.bloodFx.explode(e.head ? 14 : 7, e.x, e.y);
-        this.sparkFx.explode(e.elem === 2 ? 10 : 4, e.x, e.y);
-        if (e.elem === 1) this.fireFx.explode(5, e.x, e.y);
-        sfx.hit(e.head);
+        this.whenBulletArrives(e.x, e.y, () => {
+          this.bloodFx.explode(e.head ? 16 : 8, e.x, e.y);
+          this.sparkFx.explode(e.elem === 2 ? 10 : e.head ? 6 : 3, e.x, e.y);
+          if (e.elem === 1) this.fireFx.explode(5, e.x, e.y);
+          sfx.hit(e.head);
+        });
         break;
       case 'kill':
-        this.bloodFx.explode(e.head ? 40 : 26, e.x, e.y);
-        if (e.by === local && settings.shake) this.cameras.main.shake(90, e.head ? 0.006 : 0.003);
-        sfx.zombieDeath(e.kind);
+        this.whenBulletArrives(e.x, e.y, () => {
+          this.bloodFx.explode(e.head ? 40 : 26, e.x, e.y);
+          if (e.by === local && settings.shake) this.cameras.main.shake(90, e.head ? 0.006 : 0.003);
+          sfx.zombieDeath(e.kind);
+        });
         break;
       case 'shot':
-        sfx.shot(e.weapon, e.id === local);
+        this.onShot(e);
         break;
       case 'melee':
         sfx.swing();
@@ -906,7 +991,7 @@ export class GameScene extends Phaser.Scene {
 
   private flash(x: number, y: number, color: number, intensity: number, ms: number) {
     const l = this.lights.addLight(x, y, 500, color, intensity, 100);
-    this.tweens.addCounter({ from: intensity, to: 0, duration: ms, onUpdate: (tw) => l.setIntensity(tw.getValue() ?? 0), onComplete: () => this.lights.removeLight(l) });
+    this.tweens.addCounter({ from: intensity, to: 0, duration: ms, onUpdate: (tw) => lit(l, tw.getValue() ?? 0), onComplete: () => this.lights.removeLight(l) });
   }
 
   private followCamera(dt: number) {
@@ -953,6 +1038,9 @@ export class GameScene extends Phaser.Scene {
     const cy = cam.scrollY + h / 2;
     const zone = zoneAt(this.level, cx, cy);
     const underground = zone.weather === 'under' && cy > 151 * TILE;
+    // Ganz unter der Erde verdecken die Hintergrund-Kacheln den Himmel komplett: gar nicht erst zeichnen
+    const skyHidden = cam.scrollY > 151 * TILE;
+    for (const o of this.skyGroup) (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(!skyHidden);
     const wet = rain * 0.55;
     let top = lerpColor(d.skyTop, 0x1b2129, wet);
     let bottom = lerpColor(d.skyBottom, 0x3a4250, wet);
@@ -968,7 +1056,7 @@ export class GameScene extends Phaser.Scene {
     this.sky.fillGradientStyle(top, top, bottom, bottom, 1);
     this.sky.fillRect(0, 0, w, h);
     this.stars.setAlpha(d.night * (1 - rain * 0.9));
-    this.stars.x = -(cam.scrollX * 0.02) % 400;
+    this.stars.tilePositionX = cam.scrollX * 0.02;
 
     const hh = ((hour % 24) + 24) % 24;
     const isDay = d.night < 0.5;
@@ -995,12 +1083,13 @@ export class GameScene extends Phaser.Scene {
     this.fog.tilePositionX = cam.scrollX * 0.6 + time * 0.012;
     this.fog.y = h - 20;
     this.fog.setAlpha(underground ? 0.25 : Math.min(1, d.fog * 0.9 + rain * 0.35 + (zone.weather === 'alpine' ? 0.2 : 0)));
+    this.fog.setVisible(this.fog.alpha > 0.03);
 
     // Licht
     let amb = underground ? 0x262b36 : scaleColor(lerpColor(d.ambient, 0x2a3240, rain * 0.35), 0.5 + 0.5 * d.ambientI);
     const meNet = s?.players.find((p) => p.id === this.registry.get('localId'));
     if (meNet?.inSafe) amb = lerpColor(amb, 0x6a5c48, 0.6);
-    this.selfLight.setPosition(meNet?.x ?? 0, (meNet?.y ?? 0) - 30).setIntensity(this.session && meNet?.alive ? 1.2 : 0);
+    lit(this.selfLight.setPosition(meNet?.x ?? 0, (meNet?.y ?? 0) - 30), this.session && meNet?.alive ? 1.2 : 0);
     if (horde && !underground) amb = lerpColor(amb, 0x3a0d18, 0.5);
     if (this.lightning > 0 && !underground) amb = lerpColor(amb, 0xffffff, this.lightning * 0.8);
     this.lights.setAmbientColor(amb);
@@ -1015,8 +1104,8 @@ export class GameScene extends Phaser.Scene {
       if (l.kind === 'neon') on = Phaser.Math.Clamp((d.night - 0.15) / 0.3, 0, 1) * (Math.sin(time * 0.004 + l.seed) > -0.97 ? 1 : 0.2);
       if (l.kind === 'alarm') on = 0.5 + 0.5 * Math.sin(time * 0.006 + l.seed);
       const flick = l.kind === 'street' ? 0.88 + 0.12 * Math.sin(time * 0.01 + l.seed) * Math.sin(time * 0.0031 + l.seed * 2) : 1;
-      l.light.setIntensity(l.base * on * flick);
-      l.glow.setAlpha(0.45 * on * flick);
+      lit(l.light, l.base * on * flick);
+      l.glow.setAlpha((settings.bloom ? 0.45 : 0.62) * on * flick);
     }
 
     // Wetter: Regen im Tal, Schnee in den Bergen, unter der Erde nichts

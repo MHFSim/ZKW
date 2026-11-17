@@ -38,7 +38,7 @@ const KEY = 'zkw.settings.v1';
 
 const defaults: Settings = {
   name: '',
-  bloom: true,
+  bloom: false,
   vignette: true,
   rain: 'hoch',
   shake: true,
@@ -52,7 +52,13 @@ const defaults: Settings = {
 
 function load(): Settings {
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') };
+    const stored = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+    // v2: Kamera-Bloom ist nur noch Teil von „Ultra“ (Leistung auf Handys)
+    if (!stored.v2) {
+      stored.bloom = stored.preset === 'ultra';
+      stored.v2 = true;
+    }
+    return { ...defaults, ...stored };
   } catch {
     return { ...defaults };
   }
