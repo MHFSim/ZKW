@@ -1,3 +1,4 @@
+import { InputBits } from '@zkw/shared';
 import Phaser from 'phaser';
 import { ELEMENT_NAMES, type GameEvent } from '@zkw/shared';
 import { sfx } from '../audio';
@@ -38,6 +39,9 @@ export class HudScene extends Phaser.Scene {
   private ammo!: Phaser.GameObjects.Text;
   private items!: Phaser.GameObjects.Text;
   private prompt!: Phaser.GameObjects.Text;
+  private tip!: Phaser.GameObjects.Text;
+  private tipUntil = 0;
+  private tipsSeen = new Set<string>(JSON.parse(localStorage.getItem('uw-tips') ?? '[]'));
   private banner!: Phaser.GameObjects.Text;
   private sub!: Phaser.GameObjects.Text;
   private stats!: Phaser.GameObjects.Text;
@@ -49,6 +53,7 @@ export class HudScene extends Phaser.Scene {
   private wasSafe = false;
   private data_?: HudData;
   private hurt = 0;
+  private hurtAt = -1e9;
   private lastHp = 100;
 
   constructor() {
@@ -70,6 +75,7 @@ export class HudScene extends Phaser.Scene {
     this.ammo = t(28, '#f2f4f8', DISPLAY, '700');
     this.items = t(14, '#9aa4b2', FONT, '600');
     this.prompt = t(21, '#ffb547', DISPLAY, '700').setOrigin(0.5);
+    this.tip = t(16, '#b9d6ff').setOrigin(0.5).setAlpha(0);
     this.banner = t(30, '#3ddc97', DISPLAY, '700').setOrigin(0.5).setAlpha(0);
     this.sub = t(17, '#f2f4f8', FONT, '600').setOrigin(0.5);
     this.stats = t(12, '#9aa4b2', FONT, '500');
@@ -114,6 +120,7 @@ export class HudScene extends Phaser.Scene {
     this.ammo.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.bar + 24 : h - s.b - 58);
     this.items.setPosition(touch ? w / 2 - 110 : s.l, touch ? s.bar + 60 : h - s.b - 20);
     this.prompt.setPosition(w / 2, h - s.b - (touch ? 140 : 70));
+    this.tip.setPosition(w / 2, h - s.b - (touch ? 176 : 106));
     const by = touch ? Math.max(h * 0.3, s.bar + 120) : h * 0.26;
     this.banner.setPosition(w / 2, by);
     this.sub.setPosition(w / 2, by + 40);
@@ -165,10 +172,10 @@ export class HudScene extends Phaser.Scene {
         b.pointer = p.id;
         b.c.setScale(0.92);
         navigator.vibrate?.(8);
-        if (b.key === 'jump') controls.jump = true;
-        if (b.key === 'interact') controls.interact = true;
-        if (b.key === 'reload') controls.reload = true;
-        if (b.key === 'heal') controls.heal = true;
+        if (b.key === 'jump') (controls.jump = true), (controls.pulse |= InputBits.Jump);
+        if (b.key === 'interact') (controls.interact = true), (controls.pulse |= InputBits.Interact);
+        if (b.key === 'reload') (controls.reload = true), (controls.pulse |= InputBits.Reload);
+        if (b.key === 'heal') (controls.heal = true), (controls.pulse |= InputBits.Heal);
         if (b.key === 'switch') controls.switchPulse = true;
         if (b.key === 'grenade') this.game.events.emit('throw', (this.data_?.grenades ?? 0) > 0 ? 'granate' : 'molotow');
         return;
@@ -311,6 +318,9 @@ export class HudScene extends Phaser.Scene {
     if (d.grace) {
       prompt = 'Spielstand geladen – gleich geht es los …';
       pc = '#6ec8ff';
+    } else if (!d.alive) {
+      prompt = 'Gefallen – du startest gleich in der letzten Zuflucht. Deine Beute liegt im Rucksack am Fundort.';
+      pc = '#ff4d5e';
     } else if (d.downed) {
       prompt = d.revive > 0 ? `Wiederbelebung ${Math.round(d.revive * 100)} %` : 'Ein Mitspieler muss dich wiederbeleben (gedrückt halten)';
       pc = '#ff4d5e';
@@ -334,18 +344,19 @@ export class HudScene extends Phaser.Scene {
       pc = '#3ddc97';
     }
     this.prompt.setText(prompt).setColor(pc);
+    this.updateTips(d);
     for (const b of this.buttons) if (b.key === 'interact') b.c.setAlpha(d.interaction && d.interaction.kind !== 'info' ? 1 : 0.5);
 
     if (d.inSafe && !this.wasSafe) this.showBanner('Zuflucht – sicher', '#3ddc97', 'Hier greifen dich keine Zombies an · automatisch gespeichert');
     this.wasSafe = d.inSafe;
     if (this.time.now > this.bannerUntil) {
-      const fade = this.game.loop.delta / 300;
-      this.banner.setAlpha(Math.max(0, this.banner.alpha - fade));
-      this.sub.setAlpha(Math.max(0, this.sub.alpha - fade));
+      const a = Math.max(0, 1 - (this.time.now - this.bannerUntil) / 350);
+      this.banner.setAlpha(Math.min(this.banner.alpha, a));
+      this.sub.setAlpha(Math.min(this.sub.alpha, a));
     }
-    if (d.hp > 0 && this.lastHp > 0 && d.hp < this.lastHp) this.hurt = 1;
+    if (d.hp > 0 && this.lastHp > 0 && d.hp < this.lastHp) this.hurtAt = this.time.now;
     this.lastHp = d.hp;
-    this.hurt = Math.max(0, this.hurt - this.game.loop.delta / 400);
+    this.hurt = Math.max(0, 1 - (this.time.now - this.hurtAt) / 450);
     const low = d.alive && !d.downed && pct < 0.3 ? 0.35 + Math.sin(this.time.now * 0.008) * 0.15 : 0;
     const edge = Math.max(this.hurt * 0.5, low, d.downed ? 0.4 : 0);
     if (edge > 0) {
@@ -356,5 +367,33 @@ export class HudScene extends Phaser.Scene {
     }
     if (low) sfx.heartbeat();
     this.stats.setText([d.ping ? `Ping ${d.ping} ms` : '', settings.fps ? `${d.fps} FPS` : ''].filter(Boolean).join('  ·  '));
+  }
+
+  /** Kurze Einsteiger-Tipps – jeder erscheint genau einmal (pro Gerät). */
+  private updateTips(d: HudData) {
+    const now = this.time.now;
+    this.tip.setAlpha(Phaser.Math.Clamp((this.tipUntil - now) / 400, 0, 1));
+    if (now < this.tipUntil + 1500 || d.grace || !d.alive) return;
+    const touch = controls.touch;
+    const tips: [string, boolean, string][] = [
+      ['start', d.inSafe && d.level === 1 && d.kills === 0, touch ? 'Linker Daumen: laufen · Rechter Daumen: zielen, weit ziehen = schießen' : 'A/D laufen · Maus zielen, Klick schießen · E für Türen und Stationen'],
+      ['leave', d.inSafe && d.level === 1 && d.kills === 0, 'Die Zuflucht ist sicher. Draußen bringen Zombies Geld – damit öffnest du Türen nach oben.'],
+      ['money', (d.interaction?.price ?? 0) > 0 && !d.canAfford, 'Zu wenig Geld: Treffer, Kopfschüsse und Kills bringen ¢. Zurück in eine Zuflucht kannst du jederzeit.'],
+      ['reload', !d.melee && d.mag === 0 && d.reserve > 0, touch ? 'Magazin leer – LADEN tippen' : 'Magazin leer – R zum Nachladen'],
+      ['ammo', !d.melee && d.mag === 0 && d.reserve === 0, 'Keine Munition: An Wandkäufen nachkaufen oder Munitionspacks an der Werkbank bauen.'],
+      ['skill', d.skillPoints > 0, 'Skillpunkt bereit – im Trainingsraum einer Zuflucht verteilen.'],
+      ['night', d.night > 0.7 && d.weather !== 'under', 'Nacht: Mehr und schnellere Zombies. Jede dritte Nacht kommt eine Horde.'],
+      ['hurt', d.hp < d.maxHp * 0.5 && d.heals > 0, touch ? 'Wenig Leben – HEILEN tippen' : 'Wenig Leben – H zum Heilen'],
+    ];
+    const next = tips.find(([key, cond]) => cond && !this.tipsSeen.has(key));
+    if (!next) return;
+    this.tipsSeen.add(next[0]);
+    try {
+      localStorage.setItem('uw-tips', JSON.stringify([...this.tipsSeen]));
+    } catch {
+      /* Speicher voll oder gesperrt */
+    }
+    this.tip.setText(next[2]);
+    this.tipUntil = now + 6500;
   }
 }

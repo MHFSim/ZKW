@@ -12,7 +12,8 @@ type InMsg =
   | { type: 'join'; key: string; id: number; name: string }
   | { type: 'cancelJoin'; key: string }
   | { type: 'leave'; id: number }
-  | { type: 'save'; auto?: boolean };
+  | { type: 'save'; auto?: boolean }
+  | { type: 'debug'; x?: number; y?: number; money?: number; hour?: number; rain?: number; doors?: boolean };
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 let world: World | undefined;
@@ -107,6 +108,20 @@ ctx.onmessage = (e: MessageEvent<InMsg>) => {
     case 'leave':
       world?.removePlayer(m.id);
       break;
+    case 'debug': {
+      // Nur für Tests (?debug in der Adresse): Spieler versetzen, Zeit/Wetter setzen
+      if (!world) break;
+      const p = world.players.get(0);
+      if (p && m.x !== undefined) Object.assign(p, { x: m.x, y: m.y, vx: 0, vy: 0, climbing: false });
+      if (p && m.money !== undefined) p.money = m.money;
+      if (m.hour !== undefined) world.hour = m.hour;
+      if (m.rain !== undefined) world.rain = world.rainTarget = m.rain;
+      if (m.doors) {
+        world.doorsOpen = (1 << world.level.doors.length) - 1;
+        world.power = true;
+      }
+      break;
+    }
     case 'save':
       if (world) ctx.postMessage({ type: 'save', data: world.serialize(), auto: !!m.auto });
       break;

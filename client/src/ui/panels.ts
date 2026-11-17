@@ -69,7 +69,7 @@ export function openStation(ctx: PanelCtx, kind: StationKind) {
   const render = () => {
     const me = store.me;
     if (!me) return;
-    let html = `<div class="row money-row"><span class="pill">${money(me.money)}</span>${me.skillPoints ? `<span class="pill accent">${me.skillPoints} Skillpunkt(e)</span>` : ''}</div>`;
+    let html = `<div class="row money-row"><span class="pill">${money(me.money)}</span>${kind === 'training' ? `<span class="pill ${me.skillPoints ? 'accent' : ''}">${me.skillPoints} Skillpunkt(e)${me.skillPoints ? '' : ' – mehr gibt es mit jedem Level'}</span>` : ''}</div>`;
     const discount = 1 - 0.1 * (me.skills.feilschen ?? 0);
     if (kind === 'werkbank' || kind === 'labor' || kind === 'kueche') {
       const recipes = RECIPES.filter((r) => r.stations.includes(kind));

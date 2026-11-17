@@ -29,6 +29,7 @@ const game = new Phaser.Game({
 });
 (window as any).__zkw = game;
 Object.defineProperty(window, '__session', { get: () => session });
+if (location.search.includes('debug')) (window as any).__debug = (msg: object) => (session as any)?.debug?.(msg);
 onUiOpenChange((open) => game.registry.set('uiOpen', open || !session));
 
 const gameScene = () => game.scene.getScene('game') as GameScene;

@@ -10,6 +10,8 @@ export const controls = {
   reload: false,
   heal: false,
   switchPulse: false,
+  /** Kurz gedrückte Knöpfe: Bits werden einige Ticks gehalten, damit kein Tipp verloren geht */
+  pulse: 0,
   /** Zielrichtung vom rechten Stick (nur Touch) */
   aimX: 1,
   aimY: 0,

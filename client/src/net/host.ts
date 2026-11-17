@@ -201,6 +201,10 @@ export class HostSession implements Session {
     this.worker.postMessage({ type: 'save', auto });
   }
 
+  debug(msg: object) {
+    this.worker.postMessage({ type: 'debug', ...msg });
+  }
+
   close() {
     if (this.closed) return;
     this.requestSave();

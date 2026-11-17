@@ -70,6 +70,8 @@ interface LampView {
   under: boolean;
 }
 
+const EDGE_BITS = [InputBits.Jump, InputBits.Interact, InputBits.Reload, InputBits.Heal, InputBits.Switch];
+
 export interface HudData {
   hp: number;
   maxHp: number;
@@ -139,6 +141,7 @@ export class GameScene extends Phaser.Scene {
   private projViews: Phaser.GameObjects.Image[] = [];
   private truhe!: Phaser.GameObjects.Image;
   private truheLight!: Phaser.GameObjects.Light;
+  private hold = new Map<number, number>();
   private selfLight!: Phaser.GameObjects.Light;
   private heli!: Phaser.GameObjects.Image;
   private sky!: Phaser.GameObjects.Graphics;
@@ -413,6 +416,9 @@ export class GameScene extends Phaser.Scene {
   private setupKeyboard() {
     const kb = this.input.keyboard!;
     this.keys = kb.addKeys('W,A,S,D,UP,LEFT,RIGHT,DOWN,SPACE,E,R,Q,H,G,F,F5,ONE,TWO,THREE') as Record<string, Phaser.Input.Keyboard.Key>;
+    // Sehr kurze Tastendrücke (kürzer als ein Bild) trotzdem erfassen
+    const pulseKeys: [string, number][] = [['E', InputBits.Interact], ['R', InputBits.Reload], ['H', InputBits.Heal], ['Q', InputBits.Switch], ['SPACE', InputBits.Jump], ['W', InputBits.Jump | InputBits.Up], ['UP', InputBits.Jump | InputBits.Up]];
+    for (const [name, bit] of pulseKeys) this.keys[name].on('down', () => (controls.pulse |= bit));
     kb.addCapture('F5,SPACE,UP,DOWN,LEFT,RIGHT');
     this.keys.F5.on('down', () => this.session?.requestSave());
     this.keys.G.on('down', () => this.throwItem('granate'));
@@ -556,13 +562,24 @@ export class GameScene extends Phaser.Scene {
         controls.switchPulse = false;
       }
     }
+    // Tastendruck-Bits mindestens 4 Ticks halten: übersteht verlorene Pakete und Mini-Tipper
+    if (!uiOpen) {
+      for (const bit of EDGE_BITS) if ((bits | controls.pulse) & bit) this.hold.set(bit, Math.max(this.hold.get(bit) ?? 0, 4));
+    }
+    controls.pulse = 0;
     const aim = quantizeAngle(this.aimAngle());
     this.inputAcc += dt;
     let steps = 0;
     while (this.inputAcc >= DT && steps < 5) {
       this.inputAcc -= DT;
       steps++;
-      const input: Input = { seq: (this.seq = (this.seq + 1) & 0xffff), moveX: quantizeMove(moveX), aim, bits };
+      let held = bits;
+      for (const [bit, n] of this.hold) {
+        if (n <= 0) continue;
+        held |= bit;
+        this.hold.set(bit, n - 1);
+      }
+      const input: Input = { seq: (this.seq = (this.seq + 1) & 0xffff), moveX: quantizeMove(moveX), aim, bits: held };
       applyMovement(this.cw, this.me, input);
       this.pending.push(input);
       if (this.pending.length > 120) this.pending.shift();
@@ -966,10 +983,10 @@ export class GameScene extends Phaser.Scene {
       ts.y = h + off - vy * fx * 4;
       ts.setTint(tint);
     };
-    lay(this.farMtn, 0.05, -40, lerpColor(bottom, 0x1a2030, 0.55));
-    lay(this.farSnow, 0.05, -40, lerpColor(0xe8f0ff, bottom, 0.5 + d.night * 0.3));
-    this.farSnow.setAlpha(0.8);
-    lay(this.nearMtn, 0.12, 60, lerpColor(bottom, 0x080a10, 0.72));
+    lay(this.farMtn, 0.05, -40, scaleColor(lerpColor(bottom, 0x2a3446, 0.35), 0.62));
+    lay(this.farSnow, 0.05, -40, scaleColor(lerpColor(0xe8f0ff, bottom, 0.35 + d.night * 0.25), 0.85 - d.night * 0.4));
+    this.farSnow.setAlpha(0.85);
+    lay(this.nearMtn, 0.12, 60, scaleColor(lerpColor(bottom, 0x0a0e16, 0.6), 0.55));
     lay(this.city, 0.25, 120, lerpColor(bottom, 0x000000, 0.78));
     lay(this.cityWin, 0.25, 120, 0xffffff);
     const cityVisible = cam.scrollX < 160 * TILE ? 1 : Math.max(0, 1 - (cam.scrollX - 160 * TILE) / (40 * TILE));

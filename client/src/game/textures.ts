@@ -648,34 +648,54 @@ function effects(scene: Phaser.Scene) {
   addPlain(scene, 'fog', fog);
 
   // Berge (Silhouetten mit Schnee) und Stadt-Skyline mit Fensterlicht
-  for (const [key, seed, base, amp, snow] of [['mountains-far', 3, 300, 220, true], ['mountains-near', 7, 200, 160, false]] as const) {
+  // Kachelbare Bergkette: Summe ganzzahliger Sinus-Frequenzen über 1024 px → nahtlos wiederholbar
+  const ridge = (x: number, seed: number) => {
+    let v = 0;
+    let norm = 0;
+    for (const k of [1, 2, 3, 5, 7, 11, 17, 29]) {
+      const a = 1 / Math.pow(k, 0.85);
+      const ph = hash(k, seed, 5) * Math.PI * 2;
+      const sn = Math.sin((x / 1024) * Math.PI * 2 * k + ph);
+      v += a * (k <= 3 ? sn : 1 - Math.abs(sn) * 2); // tiefe Frequenzen weich, hohe als Grate
+      norm += a;
+    }
+    return v / norm; // ca. −1 … 1
+  };
+  for (const [key, seed, base, amp, snow] of [['mountains-far', 3, 290, 190, true], ['mountains-near', 7, 170, 120, false]] as const) {
     const c = canvas(1024, 512);
     const m = ctx2d(c);
     const pts: [number, number][] = [];
-    for (let x = 0; x <= 1024; x += 8) {
-      const h = base + (fbm(x / 140, 0.5, seed) - 0.3) * amp * 2;
-      pts.push([x, 512 - h]);
-    }
-    m.fillStyle = '#ffffff';
+    for (let x = 0; x <= 1024; x += 4) pts.push([x, 512 - (base + ridge(x, seed) * amp)]);
+    // Körper mit leichtem Verlauf (oben heller = Dunst), damit die Kette auch vor dunklem Himmel lesbar bleibt
+    const gr = m.createLinearGradient(0, 512 - base - amp, 0, 512);
+    gr.addColorStop(0, '#ffffff');
+    gr.addColorStop(1, '#b8b8b8');
+    m.fillStyle = gr;
     m.beginPath();
     m.moveTo(0, 512);
     for (const [x, y] of pts) m.lineTo(x, y);
     m.lineTo(1024, 512);
     m.fill();
-    if (snow) {
-      m.globalCompositeOperation = 'source-atop';
-      m.fillStyle = 'rgba(0,0,0,0.0)';
-    }
     addPlain(scene, key, c);
     if (snow) {
+      // Schnee nur auf den hohen Gipfeln, nach unten ausfransend
       const s = canvas(1024, 512);
       const sc = ctx2d(s);
+      const snowLine = 512 - (base + amp * 0.32);
       sc.fillStyle = '#ffffff';
       sc.beginPath();
-      sc.moveTo(pts[0][0], pts[0][1]);
+      sc.moveTo(0, 512);
       for (const [x, y] of pts) sc.lineTo(x, y);
-      for (let i = pts.length - 1; i >= 0; i--) sc.lineTo(pts[i][0], pts[i][1] + 26 + fbm(i / 3, 1, 9) * 30);
+      sc.lineTo(1024, 512);
+      sc.closePath();
+      sc.save();
+      sc.clip();
+      sc.beginPath();
+      sc.moveTo(0, 0);
+      for (const [x] of pts) sc.lineTo(x, snowLine + (ridge(x * 7, seed + 4) * 0.5 + 0.5) * 34);
+      sc.lineTo(1024, 0);
       sc.fill();
+      sc.restore();
       addPlain(scene, `${key}-snow`, s);
     }
   }
