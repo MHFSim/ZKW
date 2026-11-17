@@ -1,0 +1,26 @@
+{
+  "name": "undead-week",
+  "private": true,
+  "version": "0.1.0",
+  "description": "2D-Koop-Zombie-Survival im Browser – vom Labor ganz unten bis zum Berggipfel. Bis zu 6 Spieler, ein Spieler hostet.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w client",
+    "dev:peer": "node scripts/peer-server.mjs",
+    "build": "npm run build -w client",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w shared"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "express": "^4.21.0",
+    "peer": "^1.0.2"
+  }
+}
