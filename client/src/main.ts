@@ -170,7 +170,8 @@ function showHelp() {
     'Steuerung',
     `<h3>Handy</h3>
      <div class="toggle-row"><span>Laufen</span><span class="hint">linker Daumen – der Stick erscheint, wo du tippst</span></div>
-     <div class="toggle-row"><span>Springen · Leiter hoch</span><span class="hint">linken Stick nach oben schnippen oder SPRUNG</span></div>
+     <div class="toggle-row"><span>Springen</span><span class="hint">nur mit SPRUNG</span></div>
+     <div class="toggle-row"><span>Leiter hoch</span><span class="hint">linken Stick nach oben</span></div>
      <div class="toggle-row"><span>Leiter runter · durch Stege</span><span class="hint">linken Stick nach unten</span></div>
      <div class="toggle-row"><span>Zielen und Schießen</span><span class="hint">rechter Daumen: Richtung ziehen – ab einem Drittel wird gefeuert</span></div>
      <div class="toggle-row"><span>Aktion</span><span class="hint">AKTION leuchtet, wenn etwas geht (Tür, Kauf, Station)</span></div>

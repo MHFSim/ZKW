@@ -22,12 +22,13 @@ Inspiriert von *Zombie Kill of the Week – Reborn*, aber eine eigene Welt mit e
 
 - **Türen kosten Geld** (insgesamt fast 20 000 ¢ bis zum Gipfel). Geld gibt es für Kills, Treffer und Funde.
 - **Zufluchten** sind zombiefrei: Hier levelst du Fähigkeiten, verbesserst und craftest Waffen, kaufst und verkaufst, lagerst Sachen und **handelst mit Mitspielern**.
+- **Zombies tauchen nie im Bild auf**, sondern kommen immer von außerhalb – im Finale klettern sie aus dem Schacht unter dem Gipfel herauf.
 - **Tag und Nacht** wechseln (ein Tag = 6 Minuten), dazu Regen, Gewitter, Nebel und Schnee. Jede dritte Nacht kommt eine Horde.
 - **Finale:** Drei Funkteile finden, die Funkstation verteidigen, den Mutanten besiegen und den Helikopter erreichen.
 
 ### Steuerung
 
-**Handy:** Linker Daumen läuft (der Stick erscheint dort, wo du tippst; nach oben schnippen = springen/klettern, nach unten = runter). Rechter Daumen zielt – ab einem Drittel Auslenkung wird geschossen. AKTION leuchtet und zeigt, was geht (ÖFFNEN, KAUFEN, NUTZEN …). Leere Magazine laden automatisch nach.
+**Handy:** Linker Daumen läuft (der Stick erscheint dort, wo du tippst; nach oben = Leiter hoch, nach unten = Leiter runter/durch Stege; gesprungen wird nur mit SPRUNG). Rechter Daumen zielt – ab einem Drittel Auslenkung wird geschossen. AKTION leuchtet und zeigt, was geht (ÖFFNEN, KAUFEN, NUTZEN …). Leere Magazine laden automatisch nach.
 
 | Aktion | Tastatur/Maus | Controller |
 |---|---|---|

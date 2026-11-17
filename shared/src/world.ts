@@ -98,6 +98,11 @@ const STATION_RANGE = 170;
  * Die komplette Spielwelt. Läuft beim Host im Web Worker mit 60 Ticks/s.
  * Enthält keine Grafik – nur Regeln.
  */
+/** Sichtfeld-Grenzen relativ zum Spieler (Fußpunkt), siehe visibleToAnyone */
+const VIEW_HALF_W = 1100;
+const VIEW_UP = 560;
+const VIEW_DOWN = 470;
+
 export class World implements CollisionWorld {
   tick = 0;
   hour = 6.2;
@@ -784,7 +789,8 @@ export class World implements CollisionWorld {
     if (z.retargetIn <= 0) {
       z.retargetIn = 0.5;
       z.targetId = -1;
-      let bestD = def.boss ? 3000 : 1500;
+      // Während des Finales zieht es alle Zombies zur Funkstation (auch aus dem Schacht darunter)
+      let bestD = def.boss || (this.radioPhase > 0 && this.radioPhase < 5) ? 4000 : 1500;
       for (const p of this.players.values()) {
         if (!p.alive || p.inSafe) continue;
         const d = Math.hypot(p.x - z.x, (p.y - z.y) * 2);
@@ -834,7 +840,14 @@ export class World implements CollisionWorld {
       z.vx = z.facing * speed * 0.3;
     }
     if (def.boss && Math.abs(z.vx) > def.speed) z.vx *= 0.97;
-    const { hitWall } = stepBody(this, z, DT, { blocked: this.safeRects });
+    // Leitern hochklettern, wenn das Ziel deutlich höher ist (z. B. aus dem Schacht auf den Gipfel)
+    let climbing = false;
+    if (target && target.alive && !target.inSafe && target.y < z.y + 4 && ladderAt(this, z.x, z.y, z.h) >= 0) {
+      climbing = true;
+      z.vy = def.boss ? -150 : -190;
+      z.vx = z.facing * Math.min(speed, 80);
+    }
+    const { hitWall } = stepBody(this, z, DT, { blocked: this.safeRects, noGravity: climbing, dropThrough: climbing });
     if (hitWall && z.onGround) z.vy = def.boss ? -700 : -620;
     // Aus der Welt gefallen?
     if (z.y > this.level.height * TILE) this.zombies.delete(z.id);
@@ -879,8 +892,9 @@ export class World implements CollisionWorld {
     const anchor = outside[Math.floor(this.random() * outside.length)];
     const options = this.level.zombieSpawns.filter((s) => {
       if (!this.zoneUnlocked(s.zone)) return false;
-      if (Math.abs(s.x - anchor.x) > 1500 || Math.abs(s.y - anchor.y) > 700) return false;
-      for (const p of this.players.values()) if (Math.abs(p.x - s.x) < 560 && Math.abs(p.y - s.y) < 400) return false;
+      if (Math.abs(s.x - anchor.x) > 2100 || Math.abs(s.y - anchor.y) > 1000) return false;
+      // Nie im sichtbaren Bereich irgendeines Spielers – Zombies kommen immer von außerhalb ins Bild
+      if (this.visibleToAnyone(s.x, s.y)) return false;
       if (this.inSafeZone(s.x, s.y - 10)) return false;
       return true;
     });
@@ -890,6 +904,50 @@ export class World implements CollisionWorld {
     const kind = zone.kinds[Math.floor(this.random() * zone.kinds.length)];
     const count = kind === 5 ? 3 : 1; // Schwärmer kommen in Gruppen
     for (let i = 0; i < count; i++) this.spawnZombie(kind, s.x + i * 30, s.y, s.zone);
+  }
+
+  /**
+   * Liegt der Punkt (Fußpunkt eines Zombies) im Bild eines Spielers? Großzügig gerechnet für das breiteste
+   * Handy-Format (21:9), die Kamera-Vorausschau beim Zielen und die Größe der Zombies.
+   */
+  visibleToAnyone(x: number, y: number): boolean {
+    for (const p of this.players.values()) {
+      const dx = x - p.x;
+      const dy = y - p.y;
+      if (Math.abs(dx) < VIEW_HALF_W && dy > -VIEW_UP && dy < VIEW_DOWN) return true;
+    }
+    return false;
+  }
+
+  /** Verdeckte Stelle für das Finale am Gipfel suchen (Ränder des Gipfels, außerhalb aller Sichtfelder). */
+  private hiddenSummitSpot(): { x: number; y: number } | undefined {
+    const r = this.level.radio;
+    const z = this.level.zones.find((zz) => zz.id === 1)!;
+    // Bodenhöhe des Gipfels = Höhe der Funkstation
+    const cands: number[] = [];
+    for (let tx = z.rect.x + z.rect.w - 2; tx > z.rect.x + 1; tx -= 1) cands.push(tx);
+    for (const tx of cands) {
+      const x = (tx + 0.5) * TILE;
+      if (this.visibleToAnyone(x, r.y)) continue;
+      if (this.isSolidAt(x, r.y - 20) || this.isSolidAt(x, r.y - 80)) continue;
+      return { x, y: r.y };
+    }
+    // Sonst: unten im Schacht zum Gipfel – von dort klettern sie außer Sicht herauf
+    const gate = this.level.doors.find((d) => d.unlocksZone === 1);
+    if (gate && (this.doorsOpen & (1 << gate.id)) !== 0) {
+      const x0 = Math.min(...gate.cells.map((c) => c[0]));
+      const yb = Math.max(...gate.cells.map((c) => c[1]));
+      const spot = { x: (x0 + 2) * TILE, y: (yb + 1) * TILE };
+      if (!this.visibleToAnyone(spot.x, spot.y)) return spot;
+    }
+    return undefined;
+  }
+
+  private isSolidAt(x: number, y: number) {
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    const c = this.level.rows[ty]?.[tx];
+    return c === undefined || c === '#' || c === 'c';
   }
 
   spawnZombie(kind: number, x: number, y: number, zone = 10): ZombieState {
@@ -929,18 +987,22 @@ export class World implements CollisionWorld {
   private updateRadio() {
     if (this.radioPhase === 0 || this.radioPhase >= 5) return;
     this.radioTimer -= DT;
-    const r = this.level.radio;
     if (this.radioPhase === 1) {
       // Verteidigung: zusätzliche Zombies am Gipfel
       if (this.tick % 90 === 0 && this.zombies.size < MAX_ZOMBIES) {
         const kinds = [10, 10, 1, 2, 9];
-        this.spawnZombie(kinds[Math.floor(this.random() * kinds.length)], r.x - 700 - this.random() * 300, r.y, 1);
+        const spot = this.hiddenSummitSpot();
+        if (spot) this.spawnZombie(kinds[Math.floor(this.random() * kinds.length)], spot.x, spot.y, 1);
       }
       if (this.radioTimer <= 0) {
-        this.radioPhase = 2;
-        this.spawnZombie(11, r.x - 900, r.y, 1);
-        this.events.push({ t: 'radio', phase: 2 });
-        this.events.push({ t: 'notice', text: 'Etwas Großes kommt den Berg herauf …', tone: 'warn' });
+        // Der Mutant erscheint erst, wenn eine Stelle außer Sicht frei ist
+        const spot = this.hiddenSummitSpot();
+        if (spot) {
+          this.radioPhase = 2;
+          this.spawnZombie(11, spot.x, spot.y, 1);
+          this.events.push({ t: 'radio', phase: 2 });
+          this.events.push({ t: 'notice', text: 'Etwas Großes kommt den Berg herauf …', tone: 'warn' });
+        }
       }
     } else if (this.radioPhase === 3 && this.radioTimer <= 0) {
       this.radioPhase = 4;

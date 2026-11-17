@@ -123,6 +123,7 @@ describe('Zufluchten und Beitritt', () => {
 describe('Kampf', () => {
   it('Kopfschuss tötet einen Schlurfer sofort und bringt XP', () => {
     const w = new World(level, 7);
+    w.doorsOpen = (1 << level.doors.length) - 1;
     const p = w.addPlayer(0, 'Host');
     p.x = 30 * TILE;
     p.y = 216 * TILE;
@@ -295,6 +296,7 @@ describe('Protokoll und Speichern', () => {
 describe('Finale', () => {
   it('Funkspruch → Verteidigung → Mutant → Landeplatz → Sieg', () => {
     const w = new World(level, 7);
+    w.doorsOpen = (1 << level.doors.length) - 1;
     const p = w.addPlayer(0, 'Host');
     run(w, 30);
     w.radioParts = 7;
@@ -320,5 +322,70 @@ describe('Finale', () => {
     Object.assign(p, { alive: true, downed: false, x: pad.x + pad.w / 2, y: pad.y + pad.h - 2, vx: 0, vy: 0 });
     run(w, 3);
     expect(w.victory).toBe(true);
+  });
+});
+
+describe('Spawns außer Sicht', () => {
+  it('kein Zombie erscheint je im Bild eines Spielers', () => {
+    const w = new World(level, 11);
+    const a = w.addPlayer(0, 'A');
+    const b = w.addPlayer(1, 'B');
+    w.doorsOpen = (1 << level.doors.length) - 1;
+    w.hour = 23; // Nacht: viele Spawns
+    const spots = [[40, 149], [112, 139], [205, 115], [262, 101], [300, 85], [60, 194]];
+    let spawned = 0;
+    for (const [i, [tx, ty]] of spots.entries()) {
+      Object.assign(a, { x: tx * 64, y: ty * 64, hp: 1e6, maxHp: 1e6 });
+      Object.assign(b, { x: (spots[(i + 2) % spots.length][0]) * 64, y: spots[(i + 2) % spots.length][1] * 64, hp: 1e6, maxHp: 1e6 });
+      w.zombies.clear();
+      for (let t = 0; t < 60 * 20; t++) {
+        const before = new Set(w.zombies.keys());
+        run(w, 1);
+        for (const z of w.zombies.values()) {
+          if (before.has(z.id)) continue;
+          spawned++;
+          for (const p of [a, b]) {
+            const visible = Math.abs(z.x - p.x) < 1100 && z.y - p.y > -560 && z.y - p.y < 470;
+            expect(visible, `Zombie bei ${Math.round(z.x)},${Math.round(z.y)} sichtbar für ${p.name}`).toBe(false);
+          }
+        }
+        a.hp = b.hp = 1e6;
+      }
+    }
+    expect(spawned).toBeGreaterThan(20);
+  });
+
+  it('Finale-Zombies erscheinen außer Sicht', () => {
+    const w = new World(level, 3);
+    w.doorsOpen = (1 << level.doors.length) - 1;
+    const p = w.addPlayer(0, 'A');
+    run(w, 10);
+    w.radioParts = 7;
+    Object.assign(p, { x: level.radio.x, y: level.radio.y, hp: 1e6, maxHp: 1e6 });
+    run(w, 2, 0, { moveX: 0, aim: 0, bits: InputBits.Interact });
+    run(w, 2, 0, idle);
+    expect(w.radioPhase).toBe(1);
+    let spawned = 0;
+    for (let t = 0; t < 60 * 30; t++) {
+      const before = new Set(w.zombies.keys());
+      p.hp = p.maxHp;
+      p.downed = false;
+      Object.assign(p, { x: level.radio.x, y: level.radio.y, vx: 0 });
+      run(w, 1, 0, idle);
+      for (const z of w.zombies.values()) {
+        if (before.has(z.id)) continue;
+        spawned++;
+        expect(w.visibleToAnyone(z.x, z.y)).toBe(false);
+      }
+    }
+    expect(spawned).toBeGreaterThan(5);
+    // …und sie kommen tatsächlich auf den Gipfel herauf
+    for (let t = 0; t < 60 * 20; t++) {
+      p.hp = p.maxHp;
+      p.downed = false;
+      run(w, 1, 0, idle);
+    }
+    const onSummit = [...w.zombies.values()].filter((z) => z.y <= level.radio.y + 4 && Math.abs(z.x - level.radio.x) < 1200);
+    expect(onSummit.length).toBeGreaterThan(0);
   });
 });

@@ -575,7 +575,8 @@ export class GameScene extends Phaser.Scene {
     if (!uiOpen) {
       if (controls.touch && !pad) {
         moveX = controls.moveX;
-        if (controls.up) bits |= InputBits.Up | InputBits.Jump;
+        // Linker Stick nach oben: nur klettern (Leitern), nie springen – Sprung gibt es nur über SPRUNG
+        if (controls.up) bits |= InputBits.Up;
         if (controls.down) bits |= InputBits.Down;
         if (controls.jump) bits |= InputBits.Jump;
         if (controls.interact) bits |= InputBits.Interact;

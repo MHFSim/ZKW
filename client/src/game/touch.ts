@@ -46,7 +46,7 @@ export interface TouchState {
 
 /**
  * Touch-Steuerung für Handys im Querformat.
- * - Links: Bewegungs-Stick (schwebend, mit sichtbarer Ruheposition). Nach oben schnippen = springen/klettern,
+ * - Links: Bewegungs-Stick (schwebend, mit sichtbarer Ruheposition). Nach oben = Leiter hoch (nie springen),
  *   nach unten = Leiter runter/durch Stege fallen. Kleine Totzone, damit nichts aus Versehen auslöst.
  * - Rechts: Ziel-Stick – Richtung zielt sofort, ab etwas Auslenkung wird geschossen.
  * - Knöpfe in Daumenreichweite, Größen in echten Zentimetern (CSS-Pixel), nicht in Spielpixeln.
