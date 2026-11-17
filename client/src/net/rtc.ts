@@ -35,9 +35,10 @@ export function newRoomCode(): string {
 }
 
 /** Host meldet sich mit einem freien Raum-Code an. */
-export async function openHostPeer(): Promise<{ peer: Peer; code: string }> {
+export async function openHostPeer(preferred?: string): Promise<{ peer: Peer; code: string }> {
   for (let attempt = 0; attempt < 6; attempt++) {
-    const code = newRoomCode();
+    // Zuerst den letzten Code wiederverwenden – alte Einladungs-Links bleiben gültig
+    const code = attempt === 0 && preferred && /^[A-Z2-9]{4}$/.test(preferred) ? preferred : newRoomCode();
     const peer = new Peer(roomPeerId(code), peerOptions());
     const ok = await new Promise<boolean>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('Vermittlungsdienst nicht erreichbar')), 10000);
@@ -73,7 +74,7 @@ export async function connectToRoom(code: string): Promise<{ peer: Peer; conn: D
   });
   const conn = peer.connect(roomPeerId(code), { reliable: true, serialization: 'json' });
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('Raum nicht gefunden oder Host nicht erreichbar')), 15000);
+    const t = setTimeout(() => reject(new Error('Raum nicht gefunden oder Host nicht erreichbar')), 30000);
     conn.once('open', () => {
       clearTimeout(t);
       resolve();

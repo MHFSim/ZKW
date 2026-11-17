@@ -46,7 +46,18 @@ export class HostSession implements Session {
 
   /** Raum online öffnen. Liefert den 4-stelligen Code. */
   async openRoom(): Promise<string> {
-    const { peer, code } = await openHostPeer();
+    let last: string | undefined;
+    try {
+      last = localStorage.getItem('uw-room') ?? undefined;
+    } catch {
+      /* kein Speicher */
+    }
+    const { peer, code } = await openHostPeer(last);
+    try {
+      localStorage.setItem('uw-room', code);
+    } catch {
+      /* kein Speicher */
+    }
     if (this.closed) {
       peer.destroy();
       throw new Error('beendet');
